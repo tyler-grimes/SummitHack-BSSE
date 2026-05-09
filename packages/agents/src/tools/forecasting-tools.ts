@@ -22,7 +22,8 @@ export const runPriceForecast: ToolDefinition = {
       body: JSON.stringify(input),
     });
     if (!response.ok) throw new Error(`Forecasting service error: ${response.status}`);
-    return response.json();
+    const data: unknown = await response.json();
+    return data;
   },
 };
 
@@ -44,6 +45,7 @@ export const getForecastConfidence: ToolDefinition = {
       body: JSON.stringify(input),
     });
     if (!response.ok) throw new Error(`Forecasting service error: ${response.status}`);
-    return response.json();
+    const data: unknown = await response.json();
+    return data;
   },
 };

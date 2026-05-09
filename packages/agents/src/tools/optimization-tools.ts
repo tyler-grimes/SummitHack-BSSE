@@ -12,9 +12,9 @@ export const getBatteryState: ToolDefinition = {
     },
     required: ["assetId"],
   },
-  handler: async (input) => {
+  handler: (input) => {
     // TODO: query Redis (real-time state) or TimescaleDB (historical)
-    return {
+    return Promise.resolve({
       assetId: (input as { assetId: string }).assetId,
       socPct: 50,
       socMwh: 50,
@@ -24,7 +24,7 @@ export const getBatteryState: ToolDefinition = {
       cycleCount: 100,
       degradationCostPerCycleDollars: 5.0,
       status: "stub",
-    };
+    });
   },
 };
 
@@ -48,7 +48,8 @@ export const solveDispatch: ToolDefinition = {
       body: JSON.stringify(input),
     });
     if (!response.ok) throw new Error(`Optimization service error: ${response.status}`);
-    return response.json();
+    const data: unknown = await response.json();
+    return data;
   },
 };
 
@@ -63,9 +64,9 @@ export const validateBids: ToolDefinition = {
     },
     required: ["iso", "bids"],
   },
-  handler: async (input) => {
+  handler: (_input) => {
     // TODO: ISO-specific constraint validation
-    return { valid: true, violations: [], status: "stub" };
+    return Promise.resolve({ valid: true, violations: [], status: "stub" });
   },
 };
 
@@ -80,8 +81,8 @@ export const checkRiskLimits: ToolDefinition = {
     },
     required: ["proposedBids", "assetId"],
   },
-  handler: async (input) => {
+  handler: (_input) => {
     // TODO: query Redis for current exposure, check limits
-    return { approved: true, violations: [], currentExposureMw: 0, status: "stub" };
+    return Promise.resolve({ approved: true, violations: [], currentExposureMw: 0, status: "stub" });
   },
 };

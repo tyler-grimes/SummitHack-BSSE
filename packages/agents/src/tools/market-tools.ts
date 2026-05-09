@@ -12,14 +12,14 @@ export const fetchRealtimeLmp: ToolDefinition = {
     },
     required: ["iso", "nodes"],
   },
-  handler: async (input) => {
+  handler: (_input) => {
     // TODO: query TimescaleDB
-    const { iso, nodes, lookbackMinutes = 60 } = input as {
+    const { iso, nodes, lookbackMinutes = 60 } = _input as {
       iso: string;
       nodes: string[];
       lookbackMinutes?: number;
     };
-    return { iso, nodes, lookbackMinutes, records: [], status: "stub" };
+    return Promise.resolve({ iso, nodes, lookbackMinutes, records: [], status: "stub" });
   },
 };
 
@@ -38,9 +38,9 @@ export const fetchAncillaryPrices: ToolDefinition = {
     },
     required: ["iso", "services"],
   },
-  handler: async (input) => {
+  handler: (input) => {
     // TODO: query TimescaleDB
-    return { ...(input as object), records: [], status: "stub" };
+    return Promise.resolve({ ...(input as object), records: [], status: "stub" });
   },
 };
 
@@ -57,9 +57,9 @@ export const detectAnomaly: ToolDefinition = {
     },
     required: ["iso", "node"],
   },
-  handler: async (input) => {
+  handler: (_input) => {
     // TODO: query TimescaleDB + compute z-score
-    return { isAnomaly: false, sigma: 0, currentPrice: 0, historicalMean: 0, status: "stub" };
+    return Promise.resolve({ isAnomaly: false, sigma: 0, currentPrice: 0, historicalMean: 0, status: "stub" });
   },
 };
 
@@ -77,8 +77,8 @@ export const parseIsoDocument: ToolDefinition = {
     },
     required: ["source", "docType"],
   },
-  handler: async (input) => {
+  handler: (_input) => {
     // TODO: fetch + pass to LLM parser
-    return { parsed: {}, rawText: "", status: "stub" };
+    return Promise.resolve({ parsed: {}, rawText: "", status: "stub" });
   },
 };
