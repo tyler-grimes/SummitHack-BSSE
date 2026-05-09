@@ -1,6 +1,7 @@
+from typing import Literal
+
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from typing import Literal
 
 app = FastAPI(title="Forecasting Service", version="0.1.0")
 
@@ -45,7 +46,7 @@ class ConfidenceResponse(BaseModel):
 
 
 @app.get("/health")
-def health():
+def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
