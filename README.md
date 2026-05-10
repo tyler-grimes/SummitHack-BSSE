@@ -1,6 +1,6 @@
 # BESS Trading Optimization Platform
 
-Agentic platform for Battery Energy Storage System (BESS) dispatch optimization across ERCOT and PJM. Claude-powered agents coordinate XGBoost price forecasting and CVXPY LP optimization to compute revenue-maximizing charge/discharge schedules. Simulation mode only — no live market execution.
+Agentic platform for Battery Energy Storage System (BESS) dispatch optimization across ERCOT. Caude-powered agents coordinate XGBoost price forecasting and CVXPY LP optimization to compute revenue-maximizing charge/discharge schedules. Simulation mode only — no live market execution.
 
 ## Architecture
 
