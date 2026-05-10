@@ -10,6 +10,7 @@ const BASE_CONFIG: SimConfig = {
   markets: ["DA_ENERGY"],
   startDate: "2024-01-08",
   endDate: "2024-01-10",
+  basePriceMwh: 35,
   battery: DEFAULT_BATTERY,
   forecastingUrl: "http://forecasting.test",
   optimizationUrl: "http://optimization.test",

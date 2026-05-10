@@ -16,6 +16,10 @@ export class SocTracker {
     this.socMwhInternal = cfg.initialSocPct * cfg.capacityMwh;
   }
 
+  // Both charge and discharge can be non-zero in the same interval — this
+  // mirrors the CVXPY LP SoC dynamics: soc[t+1] = soc[t] + charge*eta - discharge.
+  // The LP solver's charge+discharge <= max_power constraint prevents this in
+  // practice, but the tracker applies both effects to stay consistent with the model.
   apply(chargeMw: number, dischargeMw: number): void {
     const gained = Math.max(0, chargeMw) * this.cfg.etaCharge;
     const lost = Math.max(0, dischargeMw);

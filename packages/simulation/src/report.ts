@@ -42,12 +42,6 @@ export function printReport(result: SimResult): void {
       : 0;
 
   const revenues = days.map((d) => d.actualRevenueDollars);
-  const bestDay = days.reduce((a, b) =>
-    b.actualRevenueDollars > a.actualRevenueDollars ? b : a
-  );
-  const worstDay = days.reduce((a, b) =>
-    b.actualRevenueDollars < a.actualRevenueDollars ? b : a
-  );
 
   console.log("\n--- Summary ---");
   console.log(
@@ -61,12 +55,21 @@ export function printReport(result: SimResult): void {
     `  Avg Daily Revenue:       ${fmt(result.totalActualRevenueDollars / Math.max(1, result.daysSimulated))}`
   );
   console.log(`  Total Cycles:            ${result.totalCycles.toFixed(2)}`);
-  console.log(
-    `  Best Day:  ${bestDay.date}  ${fmt(bestDay.actualRevenueDollars)}`
-  );
-  console.log(
-    `  Worst Day: ${worstDay.date}  ${fmt(worstDay.actualRevenueDollars)}`
-  );
+
+  if (days.length > 0) {
+    const bestDay = days.reduce((a, b) =>
+      b.actualRevenueDollars > a.actualRevenueDollars ? b : a
+    );
+    const worstDay = days.reduce((a, b) =>
+      b.actualRevenueDollars < a.actualRevenueDollars ? b : a
+    );
+    console.log(
+      `  Best Day:  ${bestDay.date}  ${fmt(bestDay.actualRevenueDollars)}`
+    );
+    console.log(
+      `  Worst Day: ${worstDay.date}  ${fmt(worstDay.actualRevenueDollars)}`
+    );
+  }
 
   const mean =
     revenues.reduce((s, v) => s + v, 0) / Math.max(1, revenues.length);

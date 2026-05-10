@@ -17,6 +17,7 @@ export interface SimConfig {
   markets: string[];
   startDate: string;
   endDate: string;
+  basePriceMwh: number;
   battery: BatteryConfig;
   forecastingUrl: string;
   optimizationUrl: string;
@@ -41,6 +42,7 @@ export const DEFAULT_SIM_CONFIG: SimConfig = {
   markets: ["DA_ENERGY"],
   startDate: "2024-01-01",
   endDate: "2024-01-07",
+  basePriceMwh: 35,
   battery: DEFAULT_BATTERY,
   forecastingUrl:
     process.env["FORECASTING_SERVICE_URL"] ?? "http://localhost:8001",

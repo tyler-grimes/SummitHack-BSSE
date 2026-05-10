@@ -39,7 +39,7 @@ export async function runSimulation(config: SimConfig): Promise<SimResult> {
 
   for (const date of dates) {
     const dateStr = date.toISOString().slice(0, 10);
-    const actualLmp = generateDayLmp(date, 35);
+    const actualLmp = generateDayLmp(date, config.basePriceMwh);
     const priceMap = buildPriceMap(actualLmp);
     const socStart = tracker.socPct;
     const cyclesBefore = tracker.cycles;
