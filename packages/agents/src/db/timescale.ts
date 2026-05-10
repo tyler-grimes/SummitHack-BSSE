@@ -23,8 +23,8 @@ export interface LmpRow {
 export interface AncillaryRow {
   time: Date;
   service: string;
-  price_mw: number;
-  total_mw: number;
+  clearing_price: number;
+  mileage: number | null;
 }
 
 export async function queryLmpHistory(
@@ -49,7 +49,7 @@ export async function queryAncillaryPrices(
   lookbackMinutes: number
 ): Promise<AncillaryRow[]> {
   const result = await getPool().query<AncillaryRow>(
-    `SELECT time, service, price_mw, total_mw
+    `SELECT time, service, clearing_price, mileage
      FROM ancillary_prices
      WHERE iso = $1 AND service = ANY($2)
        AND time >= NOW() - make_interval(mins => $3::int)

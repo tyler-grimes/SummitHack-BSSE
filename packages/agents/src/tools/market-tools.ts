@@ -70,8 +70,8 @@ export const fetchAncillaryPrices: ToolDefinition = {
     const records = rows.map((r) => ({
       time: r.time.toISOString(),
       service: r.service,
-      price_mw: r.price_mw,
-      total_mw: r.total_mw,
+      clearing_price: r.clearing_price,
+      mileage: r.mileage,
     }));
 
     return { iso, services, lookbackMinutes, records };

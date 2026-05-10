@@ -230,3 +230,150 @@ export const checkRiskLimits: ToolDefinition = {
     };
   },
 };
+
+/**
+ * solve_dispatch_pulp
+ *
+ * Calls POST /dispatch on the optimization service.  Unlike solve_dispatch
+ * (which uses CVXPY and requires pre-fetched forecasts), this tool:
+ *   1. Fetches the forecast internally from the forecasting service.
+ *   2. Builds an uncertainty-adjusted price vector:
+ *        adjusted[t] = p50[t] + spread_weight * (p90[t] - p10[t]) * direction
+ *      where direction = +1 for discharge-favoured hours, -1 for charge-favoured.
+ *      This makes the LP more conservative when the model is uncertain.
+ *   3. Runs the PuLP LP and returns the signed net_mw schedule.
+ *
+ * The spread_weight is derived from forecast confidence: low confidence →
+ * wider band → more conservative objective.
+ */
+export const solveDispatchPulp: ToolDefinition = {
+  name: "solve_dispatch_pulp",
+  description:
+    "Run the PuLP LP dispatch optimizer with uncertainty-adjusted prices from p10/p50/p90 forecast bands. " +
+    "Returns signed net_mw per hour (positive = discharge, negative = charge), SoC trajectory, and expected revenue.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      hub: { type: "string", description: "Price node, e.g. HB_NORTH" },
+      iso: { type: "string", default: "ERCOT" },
+      market: { type: "string", default: "DA_ENERGY" },
+      currentSocFrac: {
+        type: "number",
+        description: "Current battery state of charge as fraction of capacity (0-1)",
+      },
+      horizonHours: { type: "number", default: 24 },
+      battery: {
+        type: "object",
+        description: "Battery parameters (all optional, service defaults apply)",
+        properties: {
+          capacity_mwh: { type: "number" },
+          max_charge_mw: { type: "number" },
+          max_discharge_mw: { type: "number" },
+          eta_charge: { type: "number" },
+          eta_discharge: { type: "number" },
+          soc_min_frac: { type: "number" },
+          soc_max_frac: { type: "number" },
+          degradation_per_mwh: { type: "number" },
+        },
+      },
+    },
+    required: ["hub", "currentSocFrac"],
+  },
+  handler: async (input) => {
+    const {
+      hub,
+      iso = "ERCOT",
+      market = "DA_ENERGY",
+      currentSocFrac,
+      horizonHours = 24,
+      battery = {},
+      useRawLmp = false,
+    } = input as {
+      hub: string;
+      iso?: string;
+      market?: string;
+      currentSocFrac: number;
+      horizonHours?: number;
+      battery?: Record<string, number>;
+      useRawLmp?: boolean;
+    };
+
+    const response = await fetch(`${OPTIMIZATION_URL}/dispatch`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        hub,
+        iso,
+        market,
+        current_soc_frac: currentSocFrac,
+        horizon_hours: horizonHours,
+        battery,
+        use_raw_lmp: useRawLmp,
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(
+        `Dispatch service error: ${response.status} ${await response.text()}`
+      );
+    }
+
+    return (await response.json()) as unknown;
+  },
+};
+
+/**
+ * update_soc
+ *
+ * Writes the latest executed SoC back to Redis after each MPC step.
+ * The key is bess:soc:<assetId> and the value is the SoC as a fraction (0-1).
+ * Also accumulates daily revenue exposure for risk checks.
+ */
+export const updateSoc: ToolDefinition = {
+  name: "update_soc",
+  description:
+    "Persist the battery's current state of charge (as a fraction 0-1) to Redis " +
+    "after executing an MPC step. Also updates daily revenue exposure.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      assetId: { type: "string" },
+      socFrac: {
+        type: "number",
+        description: "New SoC as fraction of capacity after executing the hour's command",
+      },
+      revenueExecutedDollars: {
+        type: "number",
+        description: "Actual revenue earned this step (used for risk tracking)",
+        default: 0,
+      },
+    },
+    required: ["assetId", "socFrac"],
+  },
+  handler: async (input) => {
+    const { assetId, socFrac, revenueExecutedDollars = 0 } = input as {
+      assetId: string;
+      socFrac: number;
+      revenueExecutedDollars?: number;
+    };
+
+    const redis = getRedisClient();
+
+    // Write SoC — TTL 48h so stale values don't persist across restarts
+    await redis.set(`bess:soc:${assetId}`, String(socFrac), "EX", 172800).catch(() => null);
+
+    // Accumulate daily revenue exposure (reset each calendar day via TTL)
+    const exposureKey = `risk:daily_exposure:${assetId}`;
+    const existing = await redis.get(exposureKey).catch(() => null);
+    const newExposure = (existing !== null ? parseFloat(existing) : 0) + revenueExecutedDollars;
+    // TTL: seconds until midnight UTC
+    const now = new Date();
+    const secondsUntilMidnight =
+      86400 - (now.getUTCHours() * 3600 + now.getUTCMinutes() * 60 + now.getUTCSeconds());
+    await redis
+      .set(exposureKey, String(newExposure), "EX", secondsUntilMidnight)
+      .catch(() => null);
+
+    return { assetId, socFrac, newDailyExposureDollars: newExposure };
+  },
+};

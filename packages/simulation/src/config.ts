@@ -32,7 +32,7 @@ export const DEFAULT_BATTERY: BatteryConfig = {
   socMinPct: 0.10,
   socMaxPct: 0.90,
   initialSocPct: 0.50,
-  degradationPerMwh: 2.0,
+  degradationPerMwh: 1.0,
 };
 
 export const DEFAULT_SIM_CONFIG: SimConfig = {

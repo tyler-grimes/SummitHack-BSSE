@@ -1,5 +1,7 @@
 import os
 
+FORECASTING_SERVICE_URL: str = os.getenv("FORECASTING_SERVICE_URL", "http://localhost:8001")
+
 POSTGRES_HOST: str = os.getenv("POSTGRES_HOST", "localhost")
 POSTGRES_PORT: int = int(os.getenv("POSTGRES_PORT", "5432"))
 POSTGRES_DB: str = os.getenv("POSTGRES_DB", "energy_trading")

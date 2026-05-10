@@ -8,7 +8,6 @@ import {
   callOptimize,
   type ForecastInterval,
 } from "./services.js";
-import type { DispatchInterval } from "./state.js";
 
 export interface DayResult {
   date: string;

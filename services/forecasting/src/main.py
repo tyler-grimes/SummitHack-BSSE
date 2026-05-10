@@ -304,6 +304,47 @@ async def confidence(req: ConfidenceRequest) -> ConfidenceResponse:
     )
 
 
+@app.post("/lmp-raw", response_model=list[ForecastResponse])
+async def lmp_raw(req: ForecastRequest) -> list[ForecastResponse]:
+    """Return actual LMP prices from the DB, shifted to the next 24h window.
+    Falls back to the synthetic daily shape when the DB has no data."""
+    results: list[ForecastResponse] = []
+    for node in req.nodes:
+        df = await fetch_lmp_history(req.iso, node, days=7, as_of_date=req.as_of_date)
+        now = pd.Timestamp.now(tz="UTC").floor("h")
+        if not df.empty:
+            df = df.tail(req.horizon_hours).reset_index(drop=True)
+            intervals = [
+                ForecastInterval(
+                    timestamp=(now + pd.Timedelta(hours=i + 1)).isoformat(),
+                    mean=round(float(row["lmp"]), 2),
+                    p10=round(max(0.0, float(row["lmp"]) * 0.85), 2),
+                    p90=round(float(row["lmp"]) * 1.15, 2),
+                )
+                for i, row in df.iterrows()
+            ]
+        else:
+            shape = _HOURLY_SHAPE
+            intervals = [
+                ForecastInterval(
+                    timestamp=(now + pd.Timedelta(hours=i + 1)).isoformat(),
+                    mean=round(shape[i % len(shape)], 2),
+                    p10=round(max(0.0, shape[i % len(shape)] - 10.0), 2),
+                    p90=round(shape[i % len(shape)] + 10.0, 2),
+                )
+                for i in range(req.horizon_hours)
+            ]
+        results.append(ForecastResponse(
+            iso=req.iso,
+            node=node,
+            market=req.market,
+            intervals=intervals,
+            model_id=f"{req.iso}_{node}_{req.market}_raw",
+            confidence=1.0,
+        ))
+    return results
+
+
 @app.post("/train", response_model=TrainResponse)
 async def train(req: TrainRequest) -> TrainResponse:
     mid = _model_id(req.iso, req.node, req.market)

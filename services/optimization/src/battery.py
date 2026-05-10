@@ -17,7 +17,7 @@ class BatteryParams(BaseModel):
     # the SoC window so that multi-day sims don't drain the battery on day 1
     # and stay pinned at soc_min for the rest.  Set to None to disable.
     terminal_soc_pct: float | None = Field(default=None, ge=0, le=1.0)
-    degradation_per_mwh: float = Field(default=2.0, ge=0)
+    degradation_per_mwh: float = Field(default=1.0, ge=0)
 
     @model_validator(mode="after")
     def _validate_soc_bounds(self) -> Self:
@@ -54,8 +54,10 @@ class BatteryParams(BaseModel):
     @property
     def terminal_soc_mwh(self) -> float | None:
         """Target SoC at the end of the optimization horizon.
-        Defaults to midpoint of [soc_min, soc_max] if not explicitly set."""
+        Defaults to soc_min (floor) so the optimizer can use the full battery
+        each day without being forced to refill. Set terminal_soc_pct explicitly
+        to require a higher ending state."""
         if self.terminal_soc_pct is not None:
             return self.terminal_soc_pct * self.capacity_mwh
-        # Default: midpoint of the SoC operating window
-        return (self.soc_min_pct + self.soc_max_pct) / 2.0 * self.capacity_mwh
+        # Default: floor — let the optimizer decide whether to refill
+        return self.soc_min_pct * self.capacity_mwh
