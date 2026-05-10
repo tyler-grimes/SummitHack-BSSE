@@ -1,9 +1,6 @@
 import "dotenv/config";
 import { ToolRegistry } from "./tools/tool-registry.js";
 import { OrchestratorAgent } from "./agents/orchestrator.js";
-import { MarketIntelAgent } from "./agents/market-intel.js";
-import { ForecastingAgent } from "./agents/forecasting.js";
-import { OptimizationAgent } from "./agents/optimization.js";
 import { fetchRealtimeLmp, fetchAncillaryPrices, detectAnomaly, parseIsoDocument } from "./tools/market-tools.js";
 import { runPriceForecast, getForecastConfidence } from "./tools/forecasting-tools.js";
 import { getBatteryState, solveDispatch, validateBids, checkRiskLimits } from "./tools/optimization-tools.js";
@@ -34,9 +31,6 @@ async function main() {
   const registry = buildRegistry();
 
   const orchestrator = new OrchestratorAgent(registry);
-  const marketIntel = new MarketIntelAgent(registry);
-  const forecasting = new ForecastingAgent(registry);
-  const optimization = new OptimizationAgent(registry);
 
   console.log("Agents initialized. Running DA cycle (simulation)...");
 
