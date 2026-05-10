@@ -1,8 +1,11 @@
-"""GridStatus.io fetcher — real LMP + ancillary data for ERCOT (and others).
+"""GridStatus.io fetcher — real LMP + ancillary data for ERCOT and PJM.
 
 Requires GRIDSTATUS_API_KEY env var. Free tier: 1M rows/month, 20 req/min.
 Uses the gridstatusio SDK which returns pandas DataFrames; calls are run in a
 thread to avoid blocking the async event loop.
+
+PJM ancillary service prices are not available via GridStatus — fetch_ancillary_prices
+returns [] for PJM with a warning.
 """
 
 import asyncio
@@ -18,13 +21,26 @@ from .base import BaseFetcher
 
 logger = logging.getLogger(__name__)
 
-# GridStatus dataset names
-_ERCOT_RT_LMP = "ercot_real_time_price_by_settlement_point"
-_ERCOT_DA_LMP = "ercot_settlement_point_prices"
-_ERCOT_AS_PRICES = "ercot_ancillary_service_prices"
+# Per-ISO dataset names and column mappings for the GridStatus.io API.
+_ISO_CONFIG: dict[str, dict[str, str]] = {
+    "ERCOT": {
+        "rt_lmp": "ercot_real_time_price_by_settlement_point",
+        "da_lmp": "ercot_settlement_point_prices",
+        "as_prices": "ercot_ancillary_service_prices",
+        "col_node": "Settlement Point",
+        "col_lmp": "Settlement Point Price",
+    },
+    "PJM": {
+        "rt_lmp": "pjm_lmp_real_time_5_min",
+        "da_lmp": "pjm_lmp_day_ahead_hourly",
+        "as_prices": "",  # Not available via GridStatus
+        "col_node": "Location",
+        "col_lmp": "LMP",
+    },
+}
 
-# Map GridStatus ancillary column names → our service keys
-_AS_COL_MAP: dict[str, str] = {
+# ERCOT ancillary service column names → canonical service keys
+_ERCOT_AS_COL_MAP: dict[str, str] = {
     "Regulation Up": "REG_UP",
     "Regulation Down": "REG_DOWN",
     "Non-Spinning Reserves": "NONSPIN",
@@ -33,23 +49,56 @@ _AS_COL_MAP: dict[str, str] = {
 
 
 class GridStatusFetcher(BaseFetcher):
-    """Fetches LMP and ancillary prices from GridStatus.io for ERCOT."""
+    """Fetches LMP and ancillary prices from GridStatus.io for ERCOT and PJM."""
 
     def __init__(self, iso: str = "ERCOT") -> None:
         super().__init__()
         self._iso = iso.upper()
-        self._client = GridStatusClient(api_key=config.gridstatus_api_key)
+        if self._iso not in _ISO_CONFIG:
+            raise ValueError(f"Unsupported ISO: {self._iso}. Supported: {list(_ISO_CONFIG)}")
+        self._gs_client = GridStatusClient(api_key=config.gridstatus_api_key)
+
+    async def __aenter__(self) -> "GridStatusFetcher":
+        return self
+
+    async def __aexit__(self, *_: object) -> None:
+        pass
 
     def _get_dataset(self, dataset: str, **kwargs: object) -> pd.DataFrame:
         """Synchronous SDK call — run via asyncio.to_thread."""
-        return self._client.get_dataset(dataset, **kwargs)  # type: ignore[union-attr]
+        return self._gs_client.get_dataset(dataset, **kwargs)
+
+    def _iso_cfg(self) -> dict[str, str]:
+        return _ISO_CONFIG[self._iso]
+
+    def _normalize_lmp_df(self, df: pd.DataFrame) -> pd.DataFrame:
+        cfg = self._iso_cfg()
+        return df.rename(columns={
+            "Interval Start": "time",
+            cfg["col_node"]: "node",
+            cfg["col_lmp"]: "lmp",
+        })
+
+    def _df_to_lmp_records(self, df: pd.DataFrame) -> list[dict[str, Any]]:
+        records = []
+        for _, row in df.iterrows():
+            records.append({
+                "timestamp": pd.Timestamp(row["time"]).isoformat(),
+                "iso": self._iso,
+                "node": str(row["node"]),
+                "lmp": float(row["lmp"]),
+                "energy": float(row.get("Energy", row["lmp"])),
+                "congestion": float(row.get("Congestion", 0.0)),
+                "loss": float(row.get("Loss", 0.0)),
+            })
+        return records
 
     async def fetch_rt_lmp(
         self, nodes: list[str], start: date, end: date
     ) -> list[dict[str, Any]]:
         df: pd.DataFrame = await asyncio.to_thread(
             self._get_dataset,
-            _ERCOT_RT_LMP,
+            self._iso_cfg()["rt_lmp"],
             start=start.isoformat(),
             end=end.isoformat(),
             limit=100_000,
@@ -59,27 +108,11 @@ class GridStatusFetcher(BaseFetcher):
             logger.warning("GridStatus returned empty RT LMP DataFrame for %s", self._iso)
             return []
 
-        df = df.rename(columns={
-            "Interval Start": "time",
-            "Settlement Point": "node",
-            "Settlement Point Price": "lmp",
-        })
-
+        df = self._normalize_lmp_df(df)
         if nodes:
             df = df[df["node"].isin(nodes)]
 
-        records = []
-        for _, row in df.iterrows():
-            records.append({
-                "timestamp": pd.Timestamp(row["time"]).isoformat(),
-                "iso": self._iso,
-                "node": str(row["node"]),
-                "lmp": float(row["lmp"]),
-                "energy": float(row.get("Energy", row["lmp"])),
-                "congestion": float(row.get("Congestion", 0.0)),
-                "loss": float(row.get("Loss", 0.0)),
-            })
-
+        records = self._df_to_lmp_records(df)
         logger.info("GridStatus RT LMP: %d records for %s", len(records), self._iso)
         return records
 
@@ -88,7 +121,7 @@ class GridStatusFetcher(BaseFetcher):
     ) -> list[dict[str, Any]]:
         df: pd.DataFrame = await asyncio.to_thread(
             self._get_dataset,
-            _ERCOT_DA_LMP,
+            self._iso_cfg()["da_lmp"],
             start=start.isoformat(),
             end=end.isoformat(),
             limit=100_000,
@@ -98,37 +131,26 @@ class GridStatusFetcher(BaseFetcher):
             logger.warning("GridStatus returned empty DA LMP DataFrame for %s", self._iso)
             return []
 
-        # DA dataset uses same column shape as RT for ERCOT
-        df = df.rename(columns={
-            "Interval Start": "time",
-            "Settlement Point": "node",
-            "Settlement Point Price": "lmp",
-        })
-
+        df = self._normalize_lmp_df(df)
         if nodes:
             df = df[df["node"].isin(nodes)]
 
-        records = []
-        for _, row in df.iterrows():
-            records.append({
-                "timestamp": pd.Timestamp(row["time"]).isoformat(),
-                "iso": self._iso,
-                "node": str(row["node"]),
-                "lmp": float(row["lmp"]),
-                "energy": float(row.get("Energy", row["lmp"])),
-                "congestion": float(row.get("Congestion", 0.0)),
-                "loss": float(row.get("Loss", 0.0)),
-            })
-
+        records = self._df_to_lmp_records(df)
         logger.info("GridStatus DA LMP: %d records for %s", len(records), self._iso)
         return records
 
     async def fetch_ancillary_prices(
         self, services: list[str], start: date, end: date
     ) -> list[dict[str, Any]]:
+        if not self._iso_cfg()["as_prices"]:
+            logger.warning(
+                "GridStatus ancillary prices not supported for %s — returning empty", self._iso
+            )
+            return []
+
         df: pd.DataFrame = await asyncio.to_thread(
             self._get_dataset,
-            _ERCOT_AS_PRICES,
+            self._iso_cfg()["as_prices"],
             start=start.isoformat(),
             end=end.isoformat(),
             limit=50_000,
@@ -141,7 +163,7 @@ class GridStatusFetcher(BaseFetcher):
         records = []
         for _, row in df.iterrows():
             ts = pd.Timestamp(row["Interval Start"]).isoformat()
-            for gs_col, service_key in _AS_COL_MAP.items():
+            for gs_col, service_key in _ERCOT_AS_COL_MAP.items():
                 if service_key not in services:
                     continue
                 if gs_col not in row or pd.isna(row[gs_col]):

@@ -28,20 +28,8 @@ def _mock_producer() -> MagicMock:
     return producer
 
 
-def _mock_ercot_fetcher(rt_records=None, da_records=None, as_records=None):
-    """Return a mock ErcotFetcher context manager."""
-    fetcher = AsyncMock()
-    fetcher.fetch_rt_lmp = AsyncMock(return_value=rt_records or [])
-    fetcher.fetch_da_lmp = AsyncMock(return_value=da_records or [])
-    fetcher.fetch_ancillary_prices = AsyncMock(return_value=as_records or [])
-
-    cm = AsyncMock()
-    cm.__aenter__ = AsyncMock(return_value=fetcher)
-    cm.__aexit__ = AsyncMock(return_value=False)
-    return cm, fetcher
-
-
-def _mock_pjm_fetcher(rt_records=None, da_records=None, as_records=None):
+def _mock_gs_fetcher(rt_records=None, da_records=None, as_records=None):
+    """Return a mock GridStatusFetcher async context manager."""
     fetcher = AsyncMock()
     fetcher.fetch_rt_lmp = AsyncMock(return_value=rt_records or [])
     fetcher.fetch_da_lmp = AsyncMock(return_value=da_records or [])
@@ -74,7 +62,6 @@ class TestPublish:
 
         producer.send.assert_called_once()
         call_kwargs = producer.send.call_args
-        # key should be bytes
         assert call_kwargs[1]["key"] == b"ERCOT.RT_LMP", (
             "Key must be encoded to bytes before sending to Kafka"
         )
@@ -97,11 +84,11 @@ class TestPublish:
 
 class TestIngestErcot:
     async def test_fetches_rt_lmp_for_default_nodes(self):
-        cm, fetcher = _mock_ercot_fetcher()
+        cm, fetcher = _mock_gs_fetcher()
         producer = _mock_producer()
         start = date(2024, 1, 15)
 
-        with patch("src.ingest.ErcotFetcher", return_value=cm), \
+        with patch("src.ingest.GridStatusFetcher", return_value=cm), \
              patch("src.ingest.insert_lmp_batch", AsyncMock(return_value=0)), \
              patch("src.ingest.insert_ancillary_batch", AsyncMock(return_value=0)):
             await ingest_ercot(start, start, producer)
@@ -109,11 +96,11 @@ class TestIngestErcot:
         fetcher.fetch_rt_lmp.assert_called_once_with(ERCOT_DEFAULT_NODES, start, start)
 
     async def test_fetches_da_lmp_for_default_nodes(self):
-        cm, fetcher = _mock_ercot_fetcher()
+        cm, fetcher = _mock_gs_fetcher()
         producer = _mock_producer()
         start = date(2024, 1, 15)
 
-        with patch("src.ingest.ErcotFetcher", return_value=cm), \
+        with patch("src.ingest.GridStatusFetcher", return_value=cm), \
              patch("src.ingest.insert_lmp_batch", AsyncMock(return_value=0)), \
              patch("src.ingest.insert_ancillary_batch", AsyncMock(return_value=0)):
             await ingest_ercot(start, start, producer)
@@ -121,11 +108,11 @@ class TestIngestErcot:
         fetcher.fetch_da_lmp.assert_called_once_with(ERCOT_DEFAULT_NODES, start, start)
 
     async def test_fetches_ancillary_prices(self):
-        cm, fetcher = _mock_ercot_fetcher()
+        cm, fetcher = _mock_gs_fetcher()
         producer = _mock_producer()
         start = date(2024, 1, 15)
 
-        with patch("src.ingest.ErcotFetcher", return_value=cm), \
+        with patch("src.ingest.GridStatusFetcher", return_value=cm), \
              patch("src.ingest.insert_lmp_batch", AsyncMock(return_value=0)), \
              patch("src.ingest.insert_ancillary_batch", AsyncMock(return_value=0)):
             await ingest_ercot(start, start, producer)
@@ -134,12 +121,12 @@ class TestIngestErcot:
 
     async def test_insert_lmp_batch_called_twice(self):
         """insert_lmp_batch called once for RT and once for DA."""
-        cm, _ = _mock_ercot_fetcher()
+        cm, _ = _mock_gs_fetcher()
         producer = _mock_producer()
         start = date(2024, 1, 15)
         insert_lmp_mock = AsyncMock(return_value=0)
 
-        with patch("src.ingest.ErcotFetcher", return_value=cm), \
+        with patch("src.ingest.GridStatusFetcher", return_value=cm), \
              patch("src.ingest.insert_lmp_batch", insert_lmp_mock), \
              patch("src.ingest.insert_ancillary_batch", AsyncMock(return_value=0)):
             await ingest_ercot(start, start, producer)
@@ -151,11 +138,11 @@ class TestIngestErcot:
     async def test_kafka_published_for_rt_lmp(self):
         """Kafka publish called after RT LMP insert with correct topic and key."""
         rt_records = [_lmp_record("ERCOT")]
-        cm, _ = _mock_ercot_fetcher(rt_records=rt_records)
+        cm, _ = _mock_gs_fetcher(rt_records=rt_records)
         producer = _mock_producer()
         start = date(2024, 1, 15)
 
-        with patch("src.ingest.ErcotFetcher", return_value=cm), \
+        with patch("src.ingest.GridStatusFetcher", return_value=cm), \
              patch("src.ingest.insert_lmp_batch", AsyncMock(return_value=1)), \
              patch("src.ingest.insert_ancillary_batch", AsyncMock(return_value=0)):
             await ingest_ercot(start, start, producer)
@@ -167,16 +154,15 @@ class TestIngestErcot:
 
     async def test_kafka_not_published_for_da_lmp(self):
         """Only RT LMP triggers a Kafka publish — DA LMP does not."""
-        cm, _ = _mock_ercot_fetcher(da_records=[_lmp_record("ERCOT")])
+        cm, _ = _mock_gs_fetcher(da_records=[_lmp_record("ERCOT")])
         producer = _mock_producer()
         start = date(2024, 1, 15)
 
-        with patch("src.ingest.ErcotFetcher", return_value=cm), \
+        with patch("src.ingest.GridStatusFetcher", return_value=cm), \
              patch("src.ingest.insert_lmp_batch", AsyncMock(return_value=1)), \
              patch("src.ingest.insert_ancillary_batch", AsyncMock(return_value=0)):
             await ingest_ercot(start, start, producer)
 
-        # Only 1 Kafka message (for RT), not 2
         assert producer.send.call_count == 1, (
             "DA LMP should NOT trigger a Kafka publish — only RT LMP does"
         )
@@ -186,11 +172,11 @@ class TestIngestErcot:
 
 class TestIngestPjm:
     async def test_fetches_rt_lmp_for_default_nodes(self):
-        cm, fetcher = _mock_pjm_fetcher()
+        cm, fetcher = _mock_gs_fetcher()
         producer = _mock_producer()
         start = date(2024, 1, 15)
 
-        with patch("src.ingest.PjmFetcher", return_value=cm), \
+        with patch("src.ingest.GridStatusFetcher", return_value=cm), \
              patch("src.ingest.insert_lmp_batch", AsyncMock(return_value=0)), \
              patch("src.ingest.insert_ancillary_batch", AsyncMock(return_value=0)):
             await ingest_pjm(start, start, producer)
@@ -198,11 +184,11 @@ class TestIngestPjm:
         fetcher.fetch_rt_lmp.assert_called_once_with(PJM_DEFAULT_NODES, start, start)
 
     async def test_fetches_ancillary_prices(self):
-        cm, fetcher = _mock_pjm_fetcher()
+        cm, fetcher = _mock_gs_fetcher()
         producer = _mock_producer()
         start = date(2024, 1, 15)
 
-        with patch("src.ingest.PjmFetcher", return_value=cm), \
+        with patch("src.ingest.GridStatusFetcher", return_value=cm), \
              patch("src.ingest.insert_lmp_batch", AsyncMock(return_value=0)), \
              patch("src.ingest.insert_ancillary_batch", AsyncMock(return_value=0)):
             await ingest_pjm(start, start, producer)
@@ -211,11 +197,11 @@ class TestIngestPjm:
 
     async def test_kafka_published_for_rt_lmp(self):
         rt_records = [_lmp_record("PJM")]
-        cm, _ = _mock_pjm_fetcher(rt_records=rt_records)
+        cm, _ = _mock_gs_fetcher(rt_records=rt_records)
         producer = _mock_producer()
         start = date(2024, 1, 15)
 
-        with patch("src.ingest.PjmFetcher", return_value=cm), \
+        with patch("src.ingest.GridStatusFetcher", return_value=cm), \
              patch("src.ingest.insert_lmp_batch", AsyncMock(return_value=1)), \
              patch("src.ingest.insert_ancillary_batch", AsyncMock(return_value=0)):
             await ingest_pjm(start, start, producer)
@@ -225,12 +211,12 @@ class TestIngestPjm:
         assert call_args[1]["key"] == b"PJM.RT_LMP"
 
     async def test_insert_lmp_batch_called_twice(self):
-        cm, _ = _mock_pjm_fetcher()
+        cm, _ = _mock_gs_fetcher()
         producer = _mock_producer()
         start = date(2024, 1, 15)
         insert_lmp_mock = AsyncMock(return_value=0)
 
-        with patch("src.ingest.PjmFetcher", return_value=cm), \
+        with patch("src.ingest.GridStatusFetcher", return_value=cm), \
              patch("src.ingest.insert_lmp_batch", insert_lmp_mock), \
              patch("src.ingest.insert_ancillary_batch", AsyncMock(return_value=0)):
             await ingest_pjm(start, start, producer)
@@ -325,7 +311,6 @@ class TestRunDailyIngest:
         """When no target_date provided, should default to yesterday."""
         from datetime import timedelta
 
-
         producer = _mock_producer()
         ercot_mock = AsyncMock()
         pjm_mock = AsyncMock()
@@ -338,7 +323,6 @@ class TestRunDailyIngest:
             await run_daily_ingest()  # no date passed
 
         ercot_args = ercot_mock.call_args[0]
-        # The date should be recent (within 2 days of "today" to avoid flakiness)
         from datetime import date as date_cls
         today = date_cls.today()
         yesterday = today - timedelta(days=1)

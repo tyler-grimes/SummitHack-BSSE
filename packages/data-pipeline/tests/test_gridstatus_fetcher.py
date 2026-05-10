@@ -236,3 +236,88 @@ class TestInit:
         with patch("src.fetchers.gridstatus.GridStatusClient"):
             fetcher = GridStatusFetcher()
         assert fetcher._iso == "ERCOT"
+
+    def test_pjm_iso_accepted(self):
+        with patch("src.fetchers.gridstatus.GridStatusClient"):
+            fetcher = GridStatusFetcher("PJM")
+        assert fetcher._iso == "PJM"
+
+    def test_unsupported_iso_raises(self):
+        with patch("src.fetchers.gridstatus.GridStatusClient"):
+            with pytest.raises(ValueError, match="Unsupported ISO"):
+                GridStatusFetcher("CAISO")
+
+
+# ── PJM-specific behaviour ────────────────────────────────────────────────────
+
+def _make_pjm_rt_df(locations: list[str], prices: list[float] | None = None) -> pd.DataFrame:
+    if prices is None:
+        prices = [40.0] * len(locations)
+    return pd.DataFrame({
+        "Interval Start": [pd.Timestamp("2024-01-15T01:00:00")] * len(locations),
+        "Location": locations,
+        "LMP": prices,
+    })
+
+
+class TestPjmFetchRtLmp:
+    def _fetcher(self) -> GridStatusFetcher:
+        with patch("src.fetchers.gridstatus.GridStatusClient"):
+            return GridStatusFetcher("PJM")
+
+    async def test_happy_path_returns_records(self):
+        fetcher = self._fetcher()
+        df = _make_pjm_rt_df(["AEP GEN HUB"])
+        with patch("src.fetchers.gridstatus.asyncio.to_thread", AsyncMock(return_value=df)):
+            records = await fetcher.fetch_rt_lmp(["AEP GEN HUB"], START, END)
+        assert len(records) == 1
+
+    async def test_iso_field_is_pjm(self):
+        fetcher = self._fetcher()
+        df = _make_pjm_rt_df(["AEP GEN HUB"])
+        with patch("src.fetchers.gridstatus.asyncio.to_thread", AsyncMock(return_value=df)):
+            records = await fetcher.fetch_rt_lmp(["AEP GEN HUB"], START, END)
+        assert records[0]["iso"] == "PJM"
+
+    async def test_node_mapped_from_location_column(self):
+        fetcher = self._fetcher()
+        df = _make_pjm_rt_df(["DOM HUB"])
+        with patch("src.fetchers.gridstatus.asyncio.to_thread", AsyncMock(return_value=df)):
+            records = await fetcher.fetch_rt_lmp([], START, END)
+        assert records[0]["node"] == "DOM HUB"
+
+    async def test_lmp_mapped_from_lmp_column(self):
+        fetcher = self._fetcher()
+        df = _make_pjm_rt_df(["AEP GEN HUB"], [55.5])
+        with patch("src.fetchers.gridstatus.asyncio.to_thread", AsyncMock(return_value=df)):
+            records = await fetcher.fetch_rt_lmp([], START, END)
+        assert records[0]["lmp"] == pytest.approx(55.5)
+
+    async def test_node_filter_works_for_pjm(self):
+        fetcher = self._fetcher()
+        df = _make_pjm_rt_df(["AEP GEN HUB", "DOM HUB"])
+        with patch("src.fetchers.gridstatus.asyncio.to_thread", AsyncMock(return_value=df)):
+            records = await fetcher.fetch_rt_lmp(["DOM HUB"], START, END)
+        assert len(records) == 1
+        assert records[0]["node"] == "DOM HUB"
+
+
+class TestPjmAncillaryPrices:
+    def _fetcher(self) -> GridStatusFetcher:
+        with patch("src.fetchers.gridstatus.GridStatusClient"):
+            return GridStatusFetcher("PJM")
+
+    async def test_pjm_ancillary_returns_empty(self):
+        """PJM ancillary not supported — should return [] without calling API."""
+        fetcher = self._fetcher()
+        to_thread_mock = AsyncMock()
+        with patch("src.fetchers.gridstatus.asyncio.to_thread", to_thread_mock):
+            records = await fetcher.fetch_ancillary_prices(["REG_UP"], START, END)
+        assert records == []
+        to_thread_mock.assert_not_called()
+
+    async def test_pjm_ancillary_empty_services_also_returns_empty(self):
+        fetcher = self._fetcher()
+        with patch("src.fetchers.gridstatus.asyncio.to_thread", AsyncMock()):
+            records = await fetcher.fetch_ancillary_prices([], START, END)
+        assert records == []

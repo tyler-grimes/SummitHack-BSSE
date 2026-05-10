@@ -1,6 +1,6 @@
 """
-Main ingestion worker. Fetches LMP + ancillary data from ERCOT and PJM,
-writes to TimescaleDB, publishes events to Kafka.
+Main ingestion worker. Fetches LMP + ancillary data from ERCOT and PJM via
+GridStatus.io, writes to TimescaleDB, publishes events to Kafka.
 """
 
 import asyncio
@@ -13,16 +13,17 @@ from kafka import KafkaProducer
 
 from .config import config
 from .db import close_pool, init_pool, insert_ancillary_batch, insert_lmp_batch
-from .fetchers.ercot import ErcotFetcher
-from .fetchers.pjm import PjmFetcher
+from .fetchers.gridstatus import GridStatusFetcher
 
 logger = logging.getLogger(__name__)
 
 ERCOT_DEFAULT_NODES = ["HB_NORTH", "HB_SOUTH", "HB_WEST", "HB_HOUSTON"]
 PJM_DEFAULT_NODES = ["AEP GEN HUB", "DOM HUB", "NI HUB", "PJMZN_AEP"]
 
-ERCOT_ANCILLARY_SERVICES = ["Reg-Up", "Reg-Down", "RRS", "Non-Spin", "ECRS"]
-PJM_ANCILLARY_SERVICES = ["REG", "SYNC", "ASYNC", "PRIMARY"]
+# Canonical service keys — must match GridStatusFetcher._ERCOT_AS_COL_MAP values
+ERCOT_ANCILLARY_SERVICES = ["REG_UP", "REG_DOWN", "NONSPIN", "SPIN"]
+# PJM ancillary not available via GridStatus — empty list, fetcher returns []
+PJM_ANCILLARY_SERVICES: list[str] = []
 
 
 def _kafka_producer() -> KafkaProducer:
@@ -38,7 +39,7 @@ def _publish(producer: KafkaProducer, topic: str, key: str, payload: dict[str, A
 
 
 async def ingest_ercot(start: date, end: date, producer: KafkaProducer) -> None:
-    async with ErcotFetcher() as fetcher:
+    async with GridStatusFetcher("ERCOT") as fetcher:
         logger.info("ERCOT: fetching RT LMP %s → %s", start, end)
         rt_records = await fetcher.fetch_rt_lmp(ERCOT_DEFAULT_NODES, start, end)
         inserted = await insert_lmp_batch(rt_records)
@@ -57,7 +58,7 @@ async def ingest_ercot(start: date, end: date, producer: KafkaProducer) -> None:
 
 
 async def ingest_pjm(start: date, end: date, producer: KafkaProducer) -> None:
-    async with PjmFetcher() as fetcher:
+    async with GridStatusFetcher("PJM") as fetcher:
         logger.info("PJM: fetching RT LMP %s → %s", start, end)
         rt_records = await fetcher.fetch_rt_lmp(PJM_DEFAULT_NODES, start, end)
         inserted = await insert_lmp_batch(rt_records)
@@ -69,7 +70,7 @@ async def ingest_pjm(start: date, end: date, producer: KafkaProducer) -> None:
         inserted = await insert_lmp_batch(da_records)
         logger.info("PJM DA LMP: inserted %d records", inserted)
 
-        logger.info("PJM: fetching ancillary prices")
+        logger.info("PJM: fetching ancillary prices (unsupported via GridStatus — skipped)")
         as_records = await fetcher.fetch_ancillary_prices(PJM_ANCILLARY_SERVICES, start, end)
         inserted = await insert_ancillary_batch(as_records)
         logger.info("PJM ancillary: inserted %d records", inserted)
