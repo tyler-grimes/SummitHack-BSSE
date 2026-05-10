@@ -30,6 +30,9 @@ class Config:
         "/B2C_1_PUBAPI-ROPC-FLOW/oauth2/v2.0/token"
     )
 
+    # GridStatus.io
+    gridstatus_api_key: str = os.environ.get("GRIDSTATUS_API_KEY", "")
+
     # PJM
     pjm_base_url: str = "https://api.pjm.com/api/v1"
     pjm_subscription_key: str = os.environ.get("PJM_API_KEY", "")
