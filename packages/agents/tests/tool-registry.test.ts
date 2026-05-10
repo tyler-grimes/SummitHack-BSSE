@@ -31,7 +31,7 @@ describe("ToolRegistry", () => {
       name: "my_tool",
       description: "Does something",
       inputSchema: { type: "object", properties: {}, required: [] },
-      handler: async () => ({}),
+      handler: () => Promise.resolve({}),
     });
 
     const defs = registry.getToolDefinitions();
