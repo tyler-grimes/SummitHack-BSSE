@@ -18,6 +18,7 @@ FEATURE_COLS: list[str] = [
     "lag_2h",
     "lag_4h",
     "lag_24h",
+    "lag_48h",
     "lag_168h",
     "rolling_mean_24h",
     "rolling_std_24h",
@@ -129,7 +130,20 @@ class PriceForecaster:
         )
 
         intervals: list[ForecastInterval] = []
-        lag_window: list[float] = list(features["lmp"].tail(168).to_numpy())
+
+        # Resample 5-min history to hourly so lag indices (1, 2, 4, 24, 168)
+        # represent 1h, 2h, 4h, 24h, 7d in the rolling prediction window.
+        if "time" in features.columns:
+            hourly_lmp = (
+                features.set_index("time")["lmp"]
+                .resample("1h")
+                .mean()
+                .dropna()
+                .tolist()
+            )
+        else:
+            hourly_lmp = features["lmp"].tolist()
+        lag_window: list[float] = hourly_lmp[-2016:]  # up to 84 days
 
         for h in range(1, horizon + 1):
             future_time = last_time + pd.Timedelta(hours=h)
@@ -142,7 +156,8 @@ class PriceForecaster:
             lag_2 = lag_window[-2] if len(lag_window) >= 2 else base_lmp
             lag_4 = lag_window[-4] if len(lag_window) >= 4 else base_lmp
             lag_24 = lag_window[-24] if len(lag_window) >= 24 else base_lmp
-            lag_168 = lag_window[-168] if len(lag_window) >= 168 else base_lmp
+            lag_48 = lag_window[-48] if len(lag_window) >= 48 else lag_24
+            lag_168 = lag_window[-168] if len(lag_window) >= 168 else lag_24
 
             recent_24 = lag_window[-24:] if len(lag_window) >= 24 else lag_window
             rolling_mean = float(np.mean(recent_24)) if recent_24 else base_lmp
@@ -150,7 +165,7 @@ class PriceForecaster:
 
             row_vals = [
                 hour, dow, month, is_weekend,
-                lag_1, lag_2, lag_4, lag_24, lag_168,
+                lag_1, lag_2, lag_4, lag_24, lag_48, lag_168,
                 rolling_mean, rolling_std,
             ]
             row_df = pd.DataFrame([row_vals], columns=FEATURE_COLS)

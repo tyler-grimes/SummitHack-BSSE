@@ -52,19 +52,19 @@ def test_is_trained_true_after_training() -> None:
 
 
 def test_train_raises_value_error_on_too_few_rows() -> None:
-    """After feature engineering, lag_168h drops 168 rows. Need >50 surviving rows."""
-    # 217 raw rows → 217 - 168 = 49 surviving → still < 50 → ValueError
-    df = _make_df(217)
+    """After feature engineering, lag_48h drops 48 rows. Need >50 surviving rows."""
+    # 97 raw rows → 97 - 48 = 49 surviving → still < 50 → ValueError
+    df = _make_df(97)
     fc = PriceForecaster("small_data")
     with pytest.raises(ValueError, match="Insufficient data"):
         fc.train(df)
 
 
 def test_train_raises_value_error_on_exactly_50_surviving_rows() -> None:
-    """218 raw rows → 50 surviving rows → should NOT raise (boundary at < 50)."""
-    df = _make_df(218)
+    """98 raw rows → 50 surviving rows → should NOT raise (boundary at < 50)."""
+    df = _make_df(98)
     fc = PriceForecaster("boundary_50")
-    # 218 - 168 = 50 rows → 50 >= 50 → should succeed (no error)
+    # 98 - 48 = 50 rows → 50 >= 50 → should succeed (no error)
     metrics = fc.train(df)
     assert "mae" in metrics
 
@@ -76,11 +76,12 @@ def test_train_raises_for_empty_df() -> None:
         fc.train(df)
 
 
-def test_train_raises_for_fewer_than_168_rows() -> None:
+def test_train_succeeds_with_100_rows() -> None:
+    """100 rows → 100 - 48 = 52 surviving → enough to train (lag_48h is binding, not lag_168h)."""
     df = _make_df(100)
-    fc = PriceForecaster("too_few")
-    with pytest.raises(ValueError, match="Insufficient data"):
-        fc.train(df)
+    fc = PriceForecaster("hundred_rows")
+    metrics = fc.train(df)
+    assert "mae" in metrics
 
 
 # ---------------------------------------------------------------------------
