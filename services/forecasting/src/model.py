@@ -142,7 +142,7 @@ def _make_classifier(n_estimators: int = _MAX_ESTIMATORS) -> xgb.XGBClassifier:
         subsample=0.8,
         colsample_bytree=0.8,
         min_child_weight=10,
-        scale_pos_weight=6,  # mild upweight; isotonic calibration corrects residual bias
+        scale_pos_weight=12,  # halfway to true 1:19 ratio; boosts recall without over-firing
         n_jobs=1 if _DEVICE == "cuda" else -1,
         tree_method="hist",
         device=_DEVICE,
@@ -563,11 +563,14 @@ class PriceForecaster:
             else:
                 pred_p50, pred_p10, pred_p90 = base_p50, base_p10, base_p90
 
+            # Shift predictions up by the training-set bias so the mean forecast
+            # is unbiased over the full distribution (including missed spike hours).
+            bias_correction = -self._metrics.get("bias", 0.0)
             intervals.append(ForecastInterval(
                 timestamp=future_time.isoformat(),
-                mean=pred_p50,
-                p10=pred_p10,
-                p90=pred_p90,
+                mean=pred_p50 + bias_correction,
+                p10=pred_p10 + bias_correction,
+                p90=pred_p90 + bias_correction,
             ))
 
         return intervals
