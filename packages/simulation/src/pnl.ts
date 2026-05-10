@@ -31,17 +31,31 @@ export function computeIntervalPnl(
   };
 }
 
+/**
+ * Normalize an ISO-8601 timestamp to epoch milliseconds so that format
+ * differences (e.g. ".000Z" vs "Z" vs "+00:00") don't cause lookup misses.
+ */
+function normalizeTs(ts: string): number {
+  return new Date(ts).getTime();
+}
+
 export function computeDayPnl(
   intervals: DispatchInterval[],
   actualPrices: Map<string, number>,
   cfg: BatteryConfig
 ): { expected: number; actual: number; breakdown: IntervalPnl[] } {
+  // Re-key the price map by epoch-ms so format differences don't cause misses.
+  const priceByEpoch = new Map<number, number>();
+  for (const [ts, price] of actualPrices) {
+    priceByEpoch.set(normalizeTs(ts), price);
+  }
+
   const breakdown: IntervalPnl[] = [];
   let expected = 0;
   let actual = 0;
 
   for (const iv of intervals) {
-    const lmp = actualPrices.get(iv.timestamp) ?? 0;
+    const lmp = priceByEpoch.get(normalizeTs(iv.timestamp)) ?? 0;
     const detail = computeIntervalPnl(iv, lmp, cfg);
     breakdown.push(detail);
     expected += detail.expectedRevenue;

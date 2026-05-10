@@ -17,6 +17,7 @@ class OptimizeRequest(BaseModel):
     forecasts: dict[str, list[dict[str, Any]]]
     horizon_hours: int
     markets: list[str]
+    current_soc_pct: float | None = None  # override initial SoC for the solver
 
 
 class DispatchInterval(BaseModel):
@@ -45,10 +46,17 @@ def get_battery(asset_id: str) -> BatteryParams:
 
 
 @app.post("/optimize", response_model=OptimizeResponse)
-async def optimize(req: OptimizeRequest) -> OptimizeResponse:
+def optimize(req: OptimizeRequest) -> OptimizeResponse:
+    """Solve dispatch for each market independently and select the market whose
+    complete solution yields the highest total revenue.  This guarantees a
+    physically consistent SoC trajectory (unlike the previous per-interval
+    cherry-pick across markets)."""
     params = get_battery_params(req.asset_id)
+    if req.current_soc_pct is not None:
+        params = params.model_copy(update={"initial_soc_pct": req.current_soc_pct})
 
-    merged: dict[str, dict[str, Any]] = {}
+    best_intervals: list[dict[str, Any]] = []
+    best_revenue: float = -float("inf")
     final_status = "optimal"
 
     for market in req.markets:
@@ -65,14 +73,14 @@ async def optimize(req: OptimizeRequest) -> OptimizeResponse:
 
         if status not in ("optimal", "optimal_inaccurate"):
             final_status = status
+            continue
 
-        for interval in intervals:
-            ts: str = interval["timestamp"]
-            rev: float = float(interval["expected_revenue_dollars"])
-            if ts not in merged or rev > float(merged[ts]["expected_revenue_dollars"]):
-                merged[ts] = interval
+        market_revenue = sum(float(iv["expected_revenue_dollars"]) for iv in intervals)
+        if market_revenue > best_revenue:
+            best_revenue = market_revenue
+            best_intervals = intervals
 
-    sorted_intervals = sorted(merged.values(), key=lambda x: str(x["timestamp"]))
+    sorted_intervals = sorted(best_intervals, key=lambda x: str(x["timestamp"]))
     dispatch_intervals = [DispatchInterval(**iv) for iv in sorted_intervals]
     total_revenue = sum(iv.expected_revenue_dollars for iv in dispatch_intervals)
 

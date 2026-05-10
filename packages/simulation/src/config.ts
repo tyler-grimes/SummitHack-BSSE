@@ -39,7 +39,7 @@ export const DEFAULT_SIM_CONFIG: SimConfig = {
   assetId: "BESS-001",
   iso: "ERCOT",
   node: "HB_NORTH",
-  markets: ["DA_ENERGY"],
+  markets: ["RT_ENERGY"],
   startDate: "2024-01-01",
   endDate: "2024-01-07",
   basePriceMwh: 35,

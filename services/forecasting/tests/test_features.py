@@ -58,12 +58,12 @@ def test_returns_exactly_expected_columns_plus_time_and_lmp() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_nan_rows_dropped_due_to_lag_48h() -> None:
-    """With exactly 300 rows, lag_48h (2-day lag) is the binding constraint → first 48 rows dropped."""
+def test_nan_rows_dropped_due_to_binding_constraint() -> None:
+    """With 300 rows, lag_72h (shift 72) is the binding constraint → first 72 rows dropped."""
     df = _make_df(300)
     result = build_features(df)
-    # lag_48h = shift(48) → first 48 rows NaN → dropped
-    assert len(result) == 300 - 48
+    # lag_72h = shift(72) → first 72 rows NaN → dropped
+    assert len(result) == 300 - 72
 
 
 def test_no_nan_in_output() -> None:
@@ -123,25 +123,25 @@ def test_empty_dataframe_returns_empty() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_fewer_than_49_rows_returns_empty() -> None:
-    df = _make_df(48)
+def test_fewer_than_73_rows_returns_empty() -> None:
+    df = _make_df(72)
     result = build_features(df)
-    # lag_48h = shift(48) → all 48 rows have NaN → all dropped
+    # lag_72h = shift(72) → all 72 rows have NaN lag_72h → all dropped
     assert len(result) == 0
 
 
-def test_exactly_49_rows_returns_one_row() -> None:
-    df = _make_df(49)
+def test_exactly_73_rows_returns_one_row() -> None:
+    df = _make_df(73)
     result = build_features(df)
-    # lag_48h at row 48 = lmp[0]; all other lags satisfied → 1 row survives
+    # lag_72h = shift(72) → row 72 is the first with all lags and rolling stats satisfied → 1 row survives
     assert len(result) == 1
 
 
 def test_168_rows_returns_data() -> None:
-    """168 rows now has 120 surviving rows (lag_48h is binding constraint, not lag_168h)."""
+    """168 rows with lag_72h as binding constraint → 168 - 72 = 96 surviving rows."""
     df = _make_df(168)
     result = build_features(df)
-    assert len(result) == 168 - 48
+    assert len(result) == 168 - 72
 
 
 # ---------------------------------------------------------------------------
@@ -152,10 +152,10 @@ def test_168_rows_returns_data() -> None:
 def test_lag_1h_matches_previous_lmp() -> None:
     df = _make_df(300)
     result = build_features(df)
-    # First surviving row originally at index 48 (lag_48h is binding constraint).
-    # lag_1h of that row = lmp at original index 47.
+    # First surviving row originally at index 72 (lag_72h is binding constraint).
+    # lag_1h of that row = lmp at original index 71.
     original_lmp = df["lmp"].values
-    first_idx_in_original = 48
+    first_idx_in_original = 72
     assert result["lag_1h"].iloc[0] == pytest.approx(original_lmp[first_idx_in_original - 1])
 
 
@@ -163,7 +163,7 @@ def test_lag_24h_matches_24_steps_back() -> None:
     df = _make_df(300)
     result = build_features(df)
     original_lmp = df["lmp"].values
-    first_idx_in_original = 48
+    first_idx_in_original = 72
     assert result["lag_24h"].iloc[0] == pytest.approx(original_lmp[first_idx_in_original - 24])
 
 
@@ -171,7 +171,7 @@ def test_lag_48h_matches_48_steps_back() -> None:
     df = _make_df(300)
     result = build_features(df)
     original_lmp = df["lmp"].values
-    first_idx_in_original = 48
+    first_idx_in_original = 72
     assert result["lag_48h"].iloc[0] == pytest.approx(original_lmp[first_idx_in_original - 48])
 
 
@@ -179,11 +179,11 @@ def test_lag_168h_falls_back_to_lag_24h_when_history_is_short() -> None:
     """With only 100 rows, lag_168h (shift 168) would be NaN; fillna uses lag_24h instead."""
     df = _make_df(100)
     result = build_features(df)
-    # All surviving rows (indices 48..99) have lag_168h filled from lag_24h
+    # All surviving rows (indices 72..99) have lag_168h filled from lag_24h
     assert not result["lag_168h"].isnull().any()
-    # For first surviving row at original idx 48: lag_168h == lag_24h == lmp[24]
+    # For first surviving row at original idx 72: lag_168h == lag_24h == lmp[48]
     original_lmp = df["lmp"].values
-    assert result["lag_168h"].iloc[0] == pytest.approx(original_lmp[48 - 24])
+    assert result["lag_168h"].iloc[0] == pytest.approx(original_lmp[72 - 24])
 
 
 # ---------------------------------------------------------------------------
@@ -192,13 +192,15 @@ def test_lag_168h_falls_back_to_lag_24h_when_history_is_short() -> None:
 
 
 def test_rolling_mean_24h_computed_correctly() -> None:
-    """rolling_mean_24h uses min_periods=1, so it's always available."""
+    """rolling_mean_24h is computed on shift(1) with full min_periods=24.
+    At original index 72, shifted lmp is lmp[71], and rolling(24) covers
+    shifted indices [49..72] = lmp[48..71]."""
     df = _make_df(300)
     result = build_features(df)
-    # First surviving row is originally at index 48.
-    # rolling(24) at idx 48 = mean of rows [25..48] (24 rows).
-    first_idx = 48
-    expected_mean = float(df["lmp"].iloc[first_idx - 23 : first_idx + 1].mean())
+    first_idx = 72
+    # shifted series at index i = lmp[i-1]; rolling(24) at index 72 uses
+    # shifted[49..72] = lmp[48..71]
+    expected_mean = float(df["lmp"].iloc[first_idx - 24 : first_idx].mean())
     assert result["rolling_mean_24h"].iloc[0] == pytest.approx(expected_mean, rel=1e-4)
 
 

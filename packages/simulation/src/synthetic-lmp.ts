@@ -30,7 +30,7 @@ export function generateDayLmp(date: Date, basePriceMwh = 35): LmpPoint[] {
     const noise = (rng() - 0.5) * 12;
     // 1% chance of price spike per interval
     const spike = rng() < 0.01 ? rng() * 400 + 100 : 0;
-    const lmp = Math.max(0.01, base + shape + noise + spike);
+    const lmp = base + shape + noise + spike;
     const ts = new Date(date);
     ts.setUTCHours(h, 0, 0, 0);
     return { timestamp: ts.toISOString(), lmp };

@@ -1,19 +1,21 @@
+import asyncio
 import glob
 import logging
 import os
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Coroutine
 from contextlib import asynccontextmanager
-from typing import Literal
+from typing import Any, Literal
 
 import pandas as pd
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
 from .config import settings
-from .db import close_pool, fetch_lmp_history, init_pool
+from .db import close_pool, fetch_gas_prices, fetch_grid_state, fetch_lmp_history, init_pool
 from .features import build_features
 from .model import ForecastInterval as ModelForecastInterval
 from .model import PriceForecaster
+from .weather import fetch_weather_forecast, fetch_weather_history, get_node_location
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +60,10 @@ async def _lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
 app = FastAPI(title="Forecasting Service", version="0.1.0", lifespan=_lifespan)
 
 
+async def _gather(*coros: Coroutine[Any, Any, Any]) -> tuple[Any, ...]:
+    return tuple(await asyncio.gather(*coros))
+
+
 # ---------------------------------------------------------------------------
 # Pydantic models
 # ---------------------------------------------------------------------------
@@ -68,6 +74,7 @@ class ForecastRequest(BaseModel):
     nodes: list[str]
     market: Market
     horizon_hours: int
+    as_of_date: str | None = None  # ISO date string; limits history to data on/before this date
 
 
 class ForecastInterval(BaseModel):
@@ -187,11 +194,51 @@ async def forecast(req: ForecastRequest) -> list[ForecastResponse]:
 
         if forecaster is not None and forecaster.is_trained:
             try:
-                df = await fetch_lmp_history(req.iso, node, days=90)
+                df, grid_state_df, gas_price_df = await asyncio.gather(
+                    fetch_lmp_history(req.iso, node, days=90, as_of_date=req.as_of_date),
+                    fetch_grid_state(days=90, as_of_date=req.as_of_date),
+                    fetch_gas_prices(days=90, as_of_date=req.as_of_date),
+                )
                 if df.empty:
                     raise ValueError("No historical data available")
-                feature_df = build_features(df)
-                model_ivs = forecaster.predict(feature_df, req.horizon_hours)
+
+                grid_state_df = grid_state_df if not grid_state_df.empty else None
+                gas_price_df  = gas_price_df  if not gas_price_df.empty  else None
+
+                loc = get_node_location(req.iso, node)
+                weather_hist = None
+                weather_fc = None
+                if loc:
+                    lat, lon = loc
+                    try:
+                        start = df["time"].min()
+                        end = df["time"].max()
+                        start_str = (start.strftime("%Y-%m-%d") if hasattr(start, "strftime")
+                                     else str(start)[:10])
+                        end_str = (end.strftime("%Y-%m-%d") if hasattr(end, "strftime")
+                                   else str(end)[:10])
+
+                        if req.as_of_date:
+                            # Backtesting: the "forecast" horizon is a past date — use the
+                            # historical archive so weather features match training distribution.
+                            from datetime import date as _date, timedelta
+                            sim_day = _date.fromisoformat(req.as_of_date)
+                            fc_end = sim_day + timedelta(days=1)
+                            weather_hist, weather_fc = await _gather(
+                                fetch_weather_history(lat, lon, start_str, end_str),
+                                fetch_weather_history(lat, lon, req.as_of_date, str(fc_end)),
+                            )
+                        else:
+                            # Live: fetch actual weather forecast.
+                            weather_hist, weather_fc = await _gather(
+                                fetch_weather_history(lat, lon, start_str, end_str),
+                                fetch_weather_forecast(lat, lon, hours=req.horizon_hours),
+                            )
+                    except Exception:
+                        logger.warning("Weather fetch failed for %s/%s; predicting without weather", req.iso, node)
+
+                feature_df = build_features(df, weather_hist, grid_state_df, gas_price_df)
+                model_ivs = forecaster.predict(feature_df, req.horizon_hours, weather_fc)
                 intervals = _to_api_intervals(model_ivs)
                 confidence = _confidence_from_metrics(forecaster.get_metrics())
             except Exception:
@@ -201,7 +248,7 @@ async def forecast(req: ForecastRequest) -> list[ForecastResponse]:
         else:
             base = 35.0
             try:
-                df = await fetch_lmp_history(req.iso, node, days=7)
+                df = await fetch_lmp_history(req.iso, node, days=7, as_of_date=req.as_of_date)
                 if not df.empty:
                     base = float(df["lmp"].mean())
             except Exception:
@@ -252,13 +299,44 @@ async def confidence(req: ConfidenceRequest) -> ConfidenceResponse:
 async def train(req: TrainRequest) -> TrainResponse:
     mid = _model_id(req.iso, req.node, req.market)
 
-    df = await fetch_lmp_history(req.iso, req.node, days=90)
+    # Use full available history (~6 years) so seasonal patterns are well-represented.
+    df, grid_state_df, gas_price_df = await asyncio.gather(
+        fetch_lmp_history(req.iso, req.node, days=2190),
+        fetch_grid_state(days=2190),
+        fetch_gas_prices(days=2190),
+    )
     if df.empty:
         raise HTTPException(status_code=422, detail=f"No LMP data found for {mid}")
 
+    grid_state_df = grid_state_df if not grid_state_df.empty else None
+    gas_price_df  = gas_price_df  if not gas_price_df.empty  else None
+
+    if grid_state_df is not None:
+        logger.info("Grid-state rows: %d", len(grid_state_df))
+    else:
+        logger.warning("No grid-state data; training without wind/solar/load features")
+    if gas_price_df is not None:
+        logger.info("Gas price rows: %d", len(gas_price_df))
+    else:
+        logger.warning("No gas price data; training without Henry Hub feature")
+
+    weather_df = None
+    loc = get_node_location(req.iso, req.node)
+    if loc:
+        lat, lon = loc
+        try:
+            start_str = str(df["time"].min())[:10]
+            end_str = str(df["time"].max())[:10]
+            weather_df = await fetch_weather_history(lat, lon, start_str, end_str)
+            logger.info("Fetched weather for %s/%s: %d rows", req.iso, req.node, len(weather_df))
+        except Exception:
+            logger.warning("Weather fetch failed for %s/%s; training without weather", req.iso, req.node)
+
     forecaster = PriceForecaster(model_id=mid)
     try:
-        metrics = forecaster.train(df)
+        # XGBoost training is CPU-bound — run in a thread to avoid blocking
+        # the async event loop and starving other endpoints.
+        metrics = await asyncio.to_thread(forecaster.train, df, weather_df, grid_state_df, gas_price_df)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -266,7 +344,7 @@ async def train(req: TrainRequest) -> TrainResponse:
     forecaster.save(_model_path(mid))
     _models[mid] = forecaster
 
-    feature_df = build_features(df)
+    feature_df = build_features(df, weather_df, grid_state_df, gas_price_df)
     training_rows = len(feature_df)
 
     return TrainResponse(

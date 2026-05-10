@@ -104,12 +104,13 @@ def test_soc_max_mwh_full_capacity() -> None:
 
 
 def test_initial_soc_mwh_full() -> None:
-    b = BatteryParams(asset_id="edge", capacity_mwh=100.0, initial_soc_pct=1.0)
+    # initial_soc_pct must be within [soc_min_pct, soc_max_pct]
+    b = BatteryParams(asset_id="edge", capacity_mwh=100.0, soc_min_pct=0.0, soc_max_pct=1.0, initial_soc_pct=1.0)
     assert b.initial_soc_mwh == pytest.approx(100.0)
 
 
 def test_initial_soc_mwh_zero() -> None:
-    b = BatteryParams(asset_id="edge", capacity_mwh=100.0, initial_soc_pct=0.0)
+    b = BatteryParams(asset_id="edge", capacity_mwh=100.0, soc_min_pct=0.0, soc_max_pct=0.9, initial_soc_pct=0.0)
     assert b.initial_soc_mwh == pytest.approx(0.0)
 
 
@@ -134,11 +135,9 @@ def test_asset_id_required() -> None:
         BatteryParams()  # type: ignore[call-arg]
 
 
-def test_capacity_zero_makes_all_soc_zero() -> None:
-    b = BatteryParams(asset_id="zero_cap", capacity_mwh=0.0)
-    assert b.soc_min_mwh == pytest.approx(0.0)
-    assert b.soc_max_mwh == pytest.approx(0.0)
-    assert b.initial_soc_mwh == pytest.approx(0.0)
+def test_capacity_zero_raises_validation_error() -> None:
+    with pytest.raises(ValueError):
+        BatteryParams(asset_id="zero_cap", capacity_mwh=0.0)
 
 
 def test_very_large_capacity() -> None:

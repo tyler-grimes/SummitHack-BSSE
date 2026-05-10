@@ -37,6 +37,11 @@ def solve_dispatch(
         charge <= params.max_charge_mw,
         discharge <= params.max_discharge_mw,
         charge + discharge <= max_power,
+        # Terminal SoC constraint: don't drain the battery for short-term gain.
+        # Uses a fixed target (midpoint of SoC window by default) that is
+        # independent of the current starting SoC, so the battery recovers
+        # even when it starts depleted.
+        soc[T] >= params.terminal_soc_mwh,
     ]
 
     prob = cp.Problem(cp.Maximize(revenue), constraints)

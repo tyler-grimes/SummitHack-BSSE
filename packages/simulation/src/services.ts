@@ -34,12 +34,19 @@ export async function callForecast(
   iso: string,
   node: string,
   market: string,
-  horizonHours: number
+  horizonHours: number,
+  asOfDate?: string
 ): Promise<ForecastResult[]> {
   const resp = await fetch(`${url}/forecast`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ iso, nodes: [node], market, horizon_hours: horizonHours }),
+    body: JSON.stringify({
+      iso,
+      nodes: [node],
+      market,
+      horizon_hours: horizonHours,
+      as_of_date: asOfDate ?? null,
+    }),
   });
   if (!resp.ok) {
     throw new Error(`Forecasting service ${resp.status}: ${await resp.text()}`);
@@ -52,7 +59,8 @@ export async function callOptimize(
   assetId: string,
   forecastsByMarket: Record<string, ForecastInterval[]>,
   horizonHours: number,
-  markets: string[]
+  markets: string[],
+  currentSocPct?: number
 ): Promise<OptimizeResult> {
   const resp = await fetch(`${url}/optimize`, {
     method: "POST",
@@ -62,6 +70,7 @@ export async function callOptimize(
       forecasts: forecastsByMarket,
       horizon_hours: horizonHours,
       markets,
+      current_soc_pct: currentSocPct ?? null,
     }),
   });
   if (!resp.ok) {
