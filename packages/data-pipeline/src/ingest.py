@@ -12,7 +12,7 @@ from typing import Any
 from kafka import KafkaProducer
 
 from .config import config
-from .db import close_pool, init_pool, insert_ancillary_batch, insert_lmp_batch
+from .db import close_pool, init_pool, insert_ancillary_batch, insert_lmp_batch, insert_outage_batch
 from .fetchers.gridstatus import GridStatusFetcher
 
 logger = logging.getLogger(__name__)
@@ -55,6 +55,11 @@ async def ingest_ercot(start: date, end: date, producer: KafkaProducer) -> None:
         as_records = await fetcher.fetch_ancillary_prices(ERCOT_ANCILLARY_SERVICES, start, end)
         inserted = await insert_ancillary_batch(as_records)
         logger.info("ERCOT ancillary: inserted %d records", inserted)
+
+        logger.info("ERCOT: fetching outage capacity")
+        outage_records = await fetcher.fetch_outage_capacity(start, end)
+        inserted = await insert_outage_batch(outage_records)
+        logger.info("ERCOT outage capacity: inserted %d records", inserted)
 
 
 async def ingest_pjm(start: date, end: date, producer: KafkaProducer) -> None:

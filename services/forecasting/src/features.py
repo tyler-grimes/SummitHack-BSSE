@@ -8,6 +8,7 @@ def build_features(
     weather_df: pd.DataFrame | None = None,
     grid_state_df: pd.DataFrame | None = None,
     gas_price_df: pd.DataFrame | None = None,
+    outage_df: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     out = df.copy()
     out["time"] = pd.to_datetime(out["time"], utc=True)
@@ -149,6 +150,28 @@ def build_features(
     # solar_ramp_mw: captures the evening ramp-down (duck curve tail) which drives
     # the 4-7pm price spike as solar drops and gas must ramp fast to compensate.
     out["solar_ramp_mw"] = out["solar_actual_mw"] - out["solar_actual_mw"].shift(1)
+
+    # Merge ERCOT hourly outage capacity — total MW offline + by zone.
+    # High outage MW constrains available thermal capacity → reserve squeeze → spike.
+    if outage_df is not None and not outage_df.empty:
+        out["_h"] = out["time"].dt.floor("h")
+        oc = outage_df.copy()
+        oc["_h"] = pd.to_datetime(oc["time"], utc=True).dt.floor("h")
+        oc_cols = [c for c in ["_h", "total_outage_mw", "outage_mw_zone_north",
+                                "outage_mw_zone_south", "outage_mw_zone_west",
+                                "outage_mw_zone_houston"] if c in oc.columns]
+        oc = oc[oc_cols]
+        out = out.merge(oc, on="_h", how="left").drop(columns=["_h"])
+        for col in ("total_outage_mw", "outage_mw_zone_north", "outage_mw_zone_south",
+                    "outage_mw_zone_west", "outage_mw_zone_houston"):
+            if col in out.columns:
+                out[col] = out[col].ffill().bfill()
+            else:
+                out[col] = float("nan")
+    else:
+        for col in ("total_outage_mw", "outage_mw_zone_north", "outage_mw_zone_south",
+                    "outage_mw_zone_west", "outage_mw_zone_houston"):
+            out[col] = float("nan")
 
     # Merge daily Henry Hub gas price — broadcast to all hours of each day.
     # Gas sets the marginal price in ERCOT ~70% of hours; a price spike shifts

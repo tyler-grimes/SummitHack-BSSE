@@ -44,6 +44,12 @@ _CALENDAR_COLS: tuple[str, ...] = (
     # Reserve margin proxies (true capacity data not available in schema)
     "net_load_mw",           # load - wind - solar: thermal residual demand; high → scarcity
     "renewable_penetration", # (wind + solar) / load: sudden drop from high penetration → spike
+    # Outage capacity: MW offline constrains thermal headroom → reserve squeeze → spike
+    "total_outage_mw",
+    "outage_mw_zone_north",
+    "outage_mw_zone_south",
+    "outage_mw_zone_west",
+    "outage_mw_zone_houston",
     # Fuel cost signal
     "henry_hub",             # Henry Hub gas spot $/MMBtu — sets marginal cost ~70% of hours
 )
@@ -261,10 +267,11 @@ class PriceForecaster:
         weather_df: pd.DataFrame | None = None,
         grid_state_df: pd.DataFrame | None = None,
         gas_price_df: pd.DataFrame | None = None,
+        outage_df: pd.DataFrame | None = None,
     ) -> dict[str, float]:
         # Resample raw (possibly 15-min) data to hourly for clean multi-step indexing.
         df_h = _resample_hourly(df)
-        features_h = build_features(df_h, weather_df, grid_state_df, gas_price_df)
+        features_h = build_features(df_h, weather_df, grid_state_df, gas_price_df, outage_df)
 
         if len(features_h) < 100:
             raise ValueError(
@@ -472,7 +479,6 @@ class PriceForecaster:
             "load_actual_mw":       _load,
             "load_deviation_mw":    _gs_val("load_deviation_mw"),
             "henry_hub":            _gs_val("henry_hub"),
-            # Derived reserve-margin proxies — carry last known values forward.
             "net_load_mw": (
                 _load - _wind - _solar
                 if not any(math.isnan(v) for v in (_load, _wind, _solar))
@@ -483,6 +489,12 @@ class PriceForecaster:
                 if not any(math.isnan(v) for v in (_load, _wind, _solar)) and _load != 0
                 else float("nan")
             ),
+            # Outage capacity — carry last known values forward at predict time.
+            "total_outage_mw":        _gs_val("total_outage_mw"),
+            "outage_mw_zone_north":   _gs_val("outage_mw_zone_north"),
+            "outage_mw_zone_south":   _gs_val("outage_mw_zone_south"),
+            "outage_mw_zone_west":    _gs_val("outage_mw_zone_west"),
+            "outage_mw_zone_houston": _gs_val("outage_mw_zone_houston"),
         }
 
         # Build hour → weather lookup from forecast DataFrame.

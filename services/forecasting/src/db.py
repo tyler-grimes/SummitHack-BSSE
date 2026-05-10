@@ -105,6 +105,49 @@ async def fetch_gas_prices(
     return pd.DataFrame([{"date": r["date"], "henry_hub": r["henry_hub"]} for r in rows])
 
 
+async def fetch_outage_capacity(
+    days: int = 2190, as_of_date: str | None = None
+) -> pd.DataFrame:
+    """Fetch ERCOT hourly outage capacity (total + by zone) for the last N days."""
+    pool = _get_pool()
+    cols = ["time", "total_outage_mw", "outage_mw_zone_north", "outage_mw_zone_south",
+            "outage_mw_zone_west", "outage_mw_zone_houston"]
+    if as_of_date:
+        query = """
+            SELECT time, total_outage_mw, outage_mw_zone_north, outage_mw_zone_south,
+                   outage_mw_zone_west, outage_mw_zone_houston
+            FROM ercot_outage_capacity
+            WHERE time < $1::date
+              AND time >= $1::date - ($2 || ' days')::interval
+            ORDER BY time ASC
+        """
+        as_of = date.fromisoformat(as_of_date)
+        async with pool.acquire() as conn:
+            rows: list[Any] = await conn.fetch(query, as_of, str(days))
+    else:
+        query = """
+            SELECT time, total_outage_mw, outage_mw_zone_north, outage_mw_zone_south,
+                   outage_mw_zone_west, outage_mw_zone_houston
+            FROM ercot_outage_capacity
+            WHERE time >= NOW() - ($1 || ' days')::interval
+            ORDER BY time ASC
+        """
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(query, str(days))
+
+    if not rows:
+        return pd.DataFrame(columns=cols)
+
+    return pd.DataFrame([{
+        "time":                  r["time"],
+        "total_outage_mw":       r["total_outage_mw"],
+        "outage_mw_zone_north":  r["outage_mw_zone_north"],
+        "outage_mw_zone_south":  r["outage_mw_zone_south"],
+        "outage_mw_zone_west":   r["outage_mw_zone_west"],
+        "outage_mw_zone_houston": r["outage_mw_zone_houston"],
+    } for r in rows])
+
+
 async def fetch_lmp_history(
     iso: str, node: str, days: int = 90, as_of_date: str | None = None
 ) -> pd.DataFrame:

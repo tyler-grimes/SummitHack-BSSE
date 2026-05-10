@@ -75,6 +75,34 @@ async def insert_lmp_batch(records: list[dict[str, Any]]) -> int:
     return len(records)
 
 
+async def insert_outage_batch(records: list[dict[str, Any]]) -> int:
+    """Bulk-insert ERCOT outage capacity records. Returns count inserted."""
+    if not records:
+        return 0
+    async with acquire() as conn:
+        await conn.executemany(
+            """
+            INSERT INTO ercot_outage_capacity
+                (time, total_outage_mw, outage_mw_zone_north, outage_mw_zone_south,
+                 outage_mw_zone_west, outage_mw_zone_houston)
+            VALUES ($1, $2, $3, $4, $5, $6)
+            ON CONFLICT DO NOTHING
+            """,
+            [
+                (
+                    _to_dt(r["timestamp"]),
+                    r["total_outage_mw"],
+                    r["outage_mw_zone_north"],
+                    r["outage_mw_zone_south"],
+                    r["outage_mw_zone_west"],
+                    r["outage_mw_zone_houston"],
+                )
+                for r in records
+            ],
+        )
+    return len(records)
+
+
 async def insert_ancillary_batch(records: list[dict[str, Any]]) -> int:
     """Bulk-insert ancillary price records. Returns count inserted."""
     if not records:

@@ -141,6 +141,50 @@ class GridStatusFetcher(BaseFetcher):
         logger.info("GridStatus DA LMP: %d records for %s", len(records), self._iso)
         return records
 
+    async def fetch_outage_capacity(
+        self, start: date, end: date
+    ) -> list[dict[str, Any]]:
+        """Fetch hourly resource outage capacity for ERCOT only."""
+        if self._iso != "ERCOT":
+            return []
+
+        df: pd.DataFrame = await asyncio.to_thread(
+            self._get_dataset,
+            "ercot_hourly_resource_outage_capacity_reports",
+            start=start.isoformat(),
+            end=end.isoformat(),
+            limit=500_000,
+        )
+
+        if df.empty:
+            logger.warning("GridStatus returned empty outage capacity DataFrame")
+            return []
+
+        # Multiple publish times exist per interval — keep latest published value.
+        df = (
+            df.sort_values("publish_time_utc")
+            .groupby("interval_start_utc", as_index=False)
+            .last()
+        )
+
+        records = []
+        for _, row in df.iterrows():
+            def _mw(col: str) -> float:
+                v = row.get(col)
+                return float(v) if v is not None and not (isinstance(v, float) and v != v) else 0.0
+
+            records.append({
+                "timestamp": pd.Timestamp(row["interval_start_utc"]).isoformat(),
+                "total_outage_mw":        _mw("total_resource_mw"),
+                "outage_mw_zone_north":   _mw("total_resource_mw_zone_north"),
+                "outage_mw_zone_south":   _mw("total_resource_mw_zone_south"),
+                "outage_mw_zone_west":    _mw("total_resource_mw_zone_west"),
+                "outage_mw_zone_houston": _mw("total_resource_mw_zone_houston"),
+            })
+
+        logger.info("GridStatus outage capacity: %d hourly records", len(records))
+        return records
+
     async def fetch_ancillary_prices(
         self, services: list[str], start: date, end: date
     ) -> list[dict[str, Any]]:

@@ -11,7 +11,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
 from .config import settings
-from .db import close_pool, fetch_gas_prices, fetch_grid_state, fetch_lmp_history, init_pool
+from .db import close_pool, fetch_gas_prices, fetch_grid_state, fetch_lmp_history, fetch_outage_capacity, init_pool
 from .features import build_features
 from .model import ForecastInterval as ModelForecastInterval
 from .model import PriceForecaster
@@ -309,16 +309,18 @@ async def train(req: TrainRequest) -> TrainResponse:
     mid = _model_id(req.iso, req.node, req.market)
 
     # Use full available history (~6 years) so seasonal patterns are well-represented.
-    df, grid_state_df, gas_price_df = await asyncio.gather(
+    df, grid_state_df, gas_price_df, outage_df = await asyncio.gather(
         fetch_lmp_history(req.iso, req.node, days=2190),
         fetch_grid_state(days=2190),
         fetch_gas_prices(days=2190),
+        fetch_outage_capacity(days=2190),
     )
     if df.empty:
         raise HTTPException(status_code=422, detail=f"No LMP data found for {mid}")
 
     grid_state_df = grid_state_df if not grid_state_df.empty else None
     gas_price_df  = gas_price_df  if not gas_price_df.empty  else None
+    outage_df     = outage_df     if not outage_df.empty     else None
 
     if grid_state_df is not None:
         logger.info("Grid-state rows: %d", len(grid_state_df))
@@ -328,6 +330,10 @@ async def train(req: TrainRequest) -> TrainResponse:
         logger.info("Gas price rows: %d", len(gas_price_df))
     else:
         logger.warning("No gas price data; training without Henry Hub feature")
+    if outage_df is not None:
+        logger.info("Outage capacity rows: %d", len(outage_df))
+    else:
+        logger.warning("No outage capacity data; training without outage features")
 
     weather_df = None
     loc = get_node_location(req.iso, req.node)
@@ -345,7 +351,7 @@ async def train(req: TrainRequest) -> TrainResponse:
     try:
         # XGBoost training is CPU-bound — run in a thread to avoid blocking
         # the async event loop and starving other endpoints.
-        metrics = await asyncio.to_thread(forecaster.train, df, weather_df, grid_state_df, gas_price_df)
+        metrics = await asyncio.to_thread(forecaster.train, df, weather_df, grid_state_df, gas_price_df, outage_df)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
