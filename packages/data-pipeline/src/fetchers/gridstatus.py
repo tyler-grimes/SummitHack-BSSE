@@ -22,29 +22,30 @@ from .base import BaseFetcher
 logger = logging.getLogger(__name__)
 
 # Per-ISO dataset names and column mappings for the GridStatus.io API.
+# Column names verified against live API responses 2026-05-09.
 _ISO_CONFIG: dict[str, dict[str, str]] = {
     "ERCOT": {
-        "rt_lmp": "ercot_real_time_price_by_settlement_point",
-        "da_lmp": "ercot_settlement_point_prices",
-        "as_prices": "ercot_ancillary_service_prices",
-        "col_node": "Settlement Point",
-        "col_lmp": "Settlement Point Price",
+        "rt_lmp": "ercot_lmp_by_settlement_point",
+        "da_lmp": "ercot_lmp_by_bus_dam",
+        "as_prices": "ercot_as_prices",
+        "col_node": "location",
+        "col_lmp": "lmp",
     },
     "PJM": {
         "rt_lmp": "pjm_lmp_real_time_5_min",
         "da_lmp": "pjm_lmp_day_ahead_hourly",
         "as_prices": "",  # Not available via GridStatus
-        "col_node": "Location",
-        "col_lmp": "LMP",
+        "col_node": "location",
+        "col_lmp": "lmp",
     },
 }
 
 # ERCOT ancillary service column names → canonical service keys
 _ERCOT_AS_COL_MAP: dict[str, str] = {
-    "Regulation Up": "REG_UP",
-    "Regulation Down": "REG_DOWN",
-    "Non-Spinning Reserves": "NONSPIN",
-    "Responsive Reserves": "SPIN",
+    "regulation_up": "REG_UP",
+    "regulation_down": "REG_DOWN",
+    "non_spinning_reserves": "NONSPIN",
+    "responsive_reserves": "SPIN",
 }
 
 
@@ -74,7 +75,7 @@ class GridStatusFetcher(BaseFetcher):
     def _normalize_lmp_df(self, df: pd.DataFrame) -> pd.DataFrame:
         cfg = self._iso_cfg()
         return df.rename(columns={
-            "Interval Start": "time",
+            "interval_start_utc": "time",
             cfg["col_node"]: "node",
             cfg["col_lmp"]: "lmp",
         })
@@ -82,14 +83,15 @@ class GridStatusFetcher(BaseFetcher):
     def _df_to_lmp_records(self, df: pd.DataFrame) -> list[dict[str, Any]]:
         records = []
         for _, row in df.iterrows():
+            lmp_val = float(row["lmp"])
             records.append({
                 "timestamp": pd.Timestamp(row["time"]).isoformat(),
                 "iso": self._iso,
                 "node": str(row["node"]),
-                "lmp": float(row["lmp"]),
-                "energy": float(row.get("Energy", row["lmp"])),
-                "congestion": float(row.get("Congestion", 0.0)),
-                "loss": float(row.get("Loss", 0.0)),
+                "lmp": lmp_val,
+                "energy": float(row.get("energy", lmp_val)),
+                "congestion": float(row.get("congestion", 0.0)),
+                "loss": float(row.get("loss", 0.0)),
             })
         return records
 
@@ -162,7 +164,7 @@ class GridStatusFetcher(BaseFetcher):
 
         records = []
         for _, row in df.iterrows():
-            ts = pd.Timestamp(row["Interval Start"]).isoformat()
+            ts = pd.Timestamp(row["interval_start_utc"]).isoformat()
             for gs_col, service_key in _ERCOT_AS_COL_MAP.items():
                 if service_key not in services:
                     continue

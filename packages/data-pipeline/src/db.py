@@ -1,6 +1,7 @@
 import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from datetime import datetime
 from typing import Any
 
 import asyncpg
@@ -41,6 +42,12 @@ async def acquire() -> AsyncGenerator[asyncpg.Connection, None]:
         yield conn
 
 
+def _to_dt(ts: object) -> datetime:
+    if isinstance(ts, datetime):
+        return ts
+    return datetime.fromisoformat(str(ts))
+
+
 async def insert_lmp_batch(records: list[dict[str, Any]]) -> int:
     """Bulk-insert LMP records. Returns count inserted."""
     if not records:
@@ -54,7 +61,7 @@ async def insert_lmp_batch(records: list[dict[str, Any]]) -> int:
             """,
             [
                 (
-                    r["timestamp"],
+                    _to_dt(r["timestamp"]),
                     r["iso"],
                     r["node"],
                     r["lmp"],
@@ -81,7 +88,7 @@ async def insert_ancillary_batch(records: list[dict[str, Any]]) -> int:
             """,
             [
                 (
-                    r["timestamp"],
+                    _to_dt(r["timestamp"]),
                     r["iso"],
                     r["service"],
                     r["clearing_price"],

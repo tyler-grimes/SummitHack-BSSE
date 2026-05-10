@@ -16,19 +16,19 @@ def _make_rt_df(nodes: list[str], prices: list[float] | None = None) -> pd.DataF
     if prices is None:
         prices = [30.0] * len(nodes)
     return pd.DataFrame({
-        "Interval Start": [pd.Timestamp("2024-01-15T01:00:00")] * len(nodes),
-        "Settlement Point": nodes,
-        "Settlement Point Price": prices,
+        "interval_start_utc": [pd.Timestamp("2024-01-15T01:00:00")] * len(nodes),
+        "location": nodes,
+        "lmp": prices,
     })
 
 
 def _make_as_df() -> pd.DataFrame:
     return pd.DataFrame({
-        "Interval Start": [pd.Timestamp("2024-01-15T00:00:00")],
-        "Regulation Up": [5.0],
-        "Regulation Down": [3.0],
-        "Non-Spinning Reserves": [2.0],
-        "Responsive Reserves": [4.0],
+        "interval_start_utc": [pd.Timestamp("2024-01-15T00:00:00")],
+        "regulation_up": [5.0],
+        "regulation_down": [3.0],
+        "non_spinning_reserves": [2.0],
+        "responsive_reserves": [4.0],
     })
 
 
@@ -113,7 +113,7 @@ class TestFetchRtLmp:
     async def test_energy_uses_explicit_column_when_present(self):
         fetcher = self._fetcher()
         df = _make_rt_df(["HB_NORTH"], [30.0])
-        df["Energy"] = 28.0
+        df["energy"] = 28.0
         with patch("src.fetchers.gridstatus.asyncio.to_thread", AsyncMock(return_value=df)):
             records = await fetcher.fetch_rt_lmp(["HB_NORTH"], START, END)
         assert records[0]["energy"] == pytest.approx(28.0)
@@ -204,7 +204,7 @@ class TestFetchAncillaryPrices:
     async def test_nan_values_skipped(self):
         fetcher = self._fetcher()
         df = _make_as_df()
-        df.loc[0, "Regulation Up"] = np.nan
+        df.loc[0, "regulation_up"] = np.nan
         with patch("src.fetchers.gridstatus.asyncio.to_thread", AsyncMock(return_value=df)):
             records = await fetcher.fetch_ancillary_prices(["REG_UP"], START, END)
         assert records == []
@@ -254,9 +254,9 @@ def _make_pjm_rt_df(locations: list[str], prices: list[float] | None = None) -> 
     if prices is None:
         prices = [40.0] * len(locations)
     return pd.DataFrame({
-        "Interval Start": [pd.Timestamp("2024-01-15T01:00:00")] * len(locations),
-        "Location": locations,
-        "LMP": prices,
+        "interval_start_utc": [pd.Timestamp("2024-01-15T01:00:00")] * len(locations),
+        "location": locations,
+        "lmp": prices,
     })
 
 

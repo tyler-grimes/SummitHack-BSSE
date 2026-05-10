@@ -110,7 +110,8 @@ class TestInsertLmpBatch:
         rows = call_args[0][1]  # second positional arg is the iterable of rows
         assert len(rows) == 1
         ts, iso, node, lmp, energy, congestion, loss = rows[0]
-        assert ts == "2024-01-15T03:00:00+00:00"
+        from datetime import datetime, timezone
+        assert ts == datetime(2024, 1, 15, 3, 0, 0, tzinfo=timezone.utc)
         assert iso == "PJM"
         assert node == "DOM HUB"
         assert lmp == 38.50
@@ -230,7 +231,8 @@ class TestInsertAncillaryBatch:
 
         rows = conn.executemany.call_args[0][1]
         ts, iso, service, clearing_price, mileage = rows[0]
-        assert ts == "2024-01-15T06:00:00+00:00"
+        from datetime import datetime, timezone
+        assert ts == datetime(2024, 1, 15, 6, 0, 0, tzinfo=timezone.utc)
         assert iso == "PJM"
         assert service == "REG"
         assert clearing_price == 12.5
