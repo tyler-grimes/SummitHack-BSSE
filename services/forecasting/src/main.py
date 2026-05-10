@@ -313,6 +313,8 @@ async def lmp_raw(req: ForecastRequest) -> list[ForecastResponse]:
         df = await fetch_lmp_history(req.iso, node, days=7, as_of_date=req.as_of_date)
         now = pd.Timestamp.now(tz="UTC").floor("h")
         if not df.empty:
+            df["time"] = pd.to_datetime(df["time"], utc=True)
+            df = df.set_index("time").resample("1h").mean().dropna()
             df = df.tail(req.horizon_hours).reset_index(drop=True)
             intervals = [
                 ForecastInterval(
@@ -324,13 +326,14 @@ async def lmp_raw(req: ForecastRequest) -> list[ForecastResponse]:
                 for i, row in df.iterrows()
             ]
         else:
-            shape = _HOURLY_SHAPE
+            # Use time-aware synthetic shape: index by actual future hour-of-day
+            # so the schedule shifts each run as clock advances.
             intervals = [
                 ForecastInterval(
                     timestamp=(now + pd.Timedelta(hours=i + 1)).isoformat(),
-                    mean=round(shape[i % len(shape)], 2),
-                    p10=round(max(0.0, shape[i % len(shape)] - 10.0), 2),
-                    p90=round(shape[i % len(shape)] + 10.0, 2),
+                    mean=round(_HOURLY_SHAPE[(now + pd.Timedelta(hours=i + 1)).hour], 2),
+                    p10=round(max(0.0, _HOURLY_SHAPE[(now + pd.Timedelta(hours=i + 1)).hour] - 10.0), 2),
+                    p90=round(_HOURLY_SHAPE[(now + pd.Timedelta(hours=i + 1)).hour] + 10.0, 2),
                 )
                 for i in range(req.horizon_hours)
             ]

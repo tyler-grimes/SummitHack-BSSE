@@ -334,15 +334,6 @@ export default function App() {
             </div>
           </div>
 
-          {/* Agent panel — real tool call log */}
-          <div ref={agentPanelRef}>
-            <AgentPanel
-              runs={agentRuns}
-              running={agentRunning}
-              onRun={runAgent}
-            />
-          </div>
-
           {/* Dispatch timeline scrubber */}
           {dispatchSchedule && (
             <TimelineScrubber
@@ -352,6 +343,15 @@ export default function App() {
               onHourChange={setPlaybackHour}
             />
           )}
+
+          {/* Agent panel — real tool call log */}
+          <div ref={agentPanelRef}>
+            <AgentPanel
+              runs={agentRuns}
+              running={agentRunning}
+              onRun={runAgent}
+            />
+          </div>
 
           {/* Bottom bar: real prices toggle */}
           <div className="flex items-center gap-3 py-2">
