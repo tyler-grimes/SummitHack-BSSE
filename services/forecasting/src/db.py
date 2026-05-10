@@ -44,8 +44,8 @@ async def fetch_grid_state(
         query = """
             SELECT time, wind_actual_mw, load_forecast_mw, load_actual_mw, solar_actual_mw
             FROM ercot_grid_state
-            WHERE time < ($1::date + interval '1 day')
-              AND time >= ($1::date + interval '1 day') - ($2 || ' days')::interval
+            WHERE time < $1::date
+              AND time >= $1::date - ($2 || ' days')::interval
             ORDER BY time ASC
         """
         as_of = date.fromisoformat(as_of_date)
@@ -82,7 +82,7 @@ async def fetch_gas_prices(
         query = """
             SELECT date, henry_hub
             FROM gas_prices
-            WHERE date <= $1::date
+            WHERE date < $1::date
               AND date >= $1::date - ($2 || ' days')::interval
             ORDER BY date ASC
         """
@@ -110,14 +110,16 @@ async def fetch_lmp_history(
 ) -> pd.DataFrame:
     pool = _get_pool()
     if as_of_date:
-        # Use end-of-day so all data for that date is included
+        # Strict upper bound: exclude the as_of date itself so the lag features
+        # reflect only what would be known at midnight of the forecast day.
+        # This prevents backtest leakage from same-day prices bleeding into lags.
         query = """
             SELECT time, lmp
             FROM lmp
             WHERE iso = $1
               AND node = $2
-              AND time < ($3::date + interval '1 day')
-              AND time >= ($3::date + interval '1 day') - ($4 || ' days')::interval
+              AND time < $3::date
+              AND time >= $3::date - ($4 || ' days')::interval
             ORDER BY time ASC
         """
         as_of = date.fromisoformat(as_of_date)

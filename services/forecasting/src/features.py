@@ -51,10 +51,39 @@ def build_features(
     shifted_lmp = out["lmp"].shift(1)
     win_24h = 24 * iph
     win_7d  = 168 * iph
+    win_6h  = 6  * iph
     out["rolling_mean_24h"] = shifted_lmp.rolling(win_24h, min_periods=win_24h).mean()
     out["rolling_std_24h"]  = shifted_lmp.rolling(win_24h, min_periods=win_24h).std().fillna(0.0)
     out["rolling_mean_7d"]  = shifted_lmp.rolling(win_7d,  min_periods=win_24h).mean()
     out["rolling_std_7d"]   = shifted_lmp.rolling(win_7d,  min_periods=win_24h).std().fillna(0.0)
+
+    # ── Intraday momentum features ────────────────────────────────────────────
+    # Short rolling std: captures intraday volatility regime.
+    # High 6h std at hour 10 → elevated spread day → optimizer should dispatch.
+    out["rolling_std_6h"] = shifted_lmp.rolling(win_6h, min_periods=max(1, win_6h // 2)).std().fillna(0.0)
+
+    # lag_1h × hour: encodes "price level at this time of day".
+    # $40 at hour 6 (pre-peak) predicts a higher afternoon than $40 at hour 20.
+    out["lag1h_x_hour"] = out["lag_1h"] * out["hour"]
+
+    # Price momentum: rate of change over last 3 hours (signed).
+    # Rising prices → afternoon peak incoming; falling → oversupply.
+    out["lmp_momentum_3h"] = out["lmp"].shift(1 * iph) - out["lmp"].shift(4 * iph)
+
+    # Intraday min/max so far (using shifted values — no look-ahead).
+    # Tells the model how wide the spread has already been today.
+    date_key = out["time"].dt.date
+    out["intraday_min_so_far"] = (
+        shifted_lmp.groupby(date_key, group_keys=False)
+        .transform(lambda s: s.expanding().min())
+        .bfill()
+    )
+    out["intraday_max_so_far"] = (
+        shifted_lmp.groupby(date_key, group_keys=False)
+        .transform(lambda s: s.expanding().max())
+        .bfill()
+    )
+    out["intraday_spread_so_far"] = out["intraday_max_so_far"] - out["intraday_min_so_far"]
 
     # Merge hourly weather onto LMP rows via floor-to-hour bucket.
     if weather_df is not None and not weather_df.empty:
@@ -101,6 +130,16 @@ def build_features(
 
     # load_deviation_mw: positive = demand above forecast → price spike risk.
     out["load_deviation_mw"] = out["load_actual_mw"] - out["load_forecast_mw"]
+
+    # net_load_mw: thermal residual after renewables. Proxy for reserve margin —
+    # when net load is high relative to thermal capacity, scarcity pricing follows.
+    out["net_load_mw"] = out["load_actual_mw"] - out["wind_actual_mw"] - out["solar_actual_mw"]
+
+    # renewable_penetration: fraction of load served by wind + solar.
+    # Sudden drops from high penetration (e.g. wind collapse at 60% share) are
+    # the strongest leading indicator of RT price spikes in ERCOT.
+    load = out["load_actual_mw"].replace(0, float("nan"))
+    out["renewable_penetration"] = (out["wind_actual_mw"] + out["solar_actual_mw"]) / load
 
     # wind_ramp_mw: rate of change in wind generation. A sudden 3 GW drop in one hour
     # is the single strongest leading indicator of an RT price spike in ERCOT.

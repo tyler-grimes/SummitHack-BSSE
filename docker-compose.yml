@@ -68,9 +68,20 @@ services:
     ports:
       - "8001:8001"
     env_file: .env
+    environment:
+      POSTGRES_HOST: timescaledb
+    volumes:
+      - model_data:/tmp/models
     depends_on:
       timescaledb:
         condition: service_healthy
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:8001/health"]
       interval: 15s
@@ -84,6 +95,8 @@ services:
     ports:
       - "8002:8002"
     env_file: .env
+    environment:
+      POSTGRES_HOST: timescaledb
     depends_on:
       timescaledb:
         condition: service_healthy
@@ -98,3 +111,4 @@ services:
 volumes:
   timescaledb_data:
   redis_data:
+  model_data:

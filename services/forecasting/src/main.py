@@ -271,6 +271,15 @@ async def forecast(req: ForecastRequest) -> list[ForecastResponse]:
     return results
 
 
+@app.get("/metrics")
+async def metrics(iso: str, node: str, market: str) -> dict[str, float]:
+    mid = _model_id(iso, node, market)
+    forecaster = _models.get(mid)
+    if forecaster is None or not forecaster.is_trained:
+        raise HTTPException(status_code=404, detail=f"No trained model for {mid}")
+    return forecaster.get_metrics()
+
+
 @app.post("/confidence", response_model=ConfidenceResponse)
 async def confidence(req: ConfidenceRequest) -> ConfidenceResponse:
     forecaster = _models.get(req.model_id)

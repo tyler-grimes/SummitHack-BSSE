@@ -9,7 +9,34 @@ import argparse
 import sys
 import time
 
-import requests
+try:
+    import requests
+except ImportError:
+    import urllib.request as _ur
+    import json as _json
+    import urllib.error as _ue
+
+    class _Resp:
+        def __init__(self, data: bytes, status: int) -> None:
+            self._data = data
+            self.status_code = status
+        def raise_for_status(self) -> None:
+            if self.status_code >= 400:
+                raise Exception(f"HTTP {self.status_code}")
+        def json(self) -> dict:
+            return _json.loads(self._data)
+
+    class requests:  # type: ignore[no-redef]
+        @staticmethod
+        def get(url: str, timeout: int = 10) -> "_Resp":
+            with _ur.urlopen(url, timeout=timeout) as r:
+                return _Resp(r.read(), r.status)
+        @staticmethod
+        def post(url: str, json: dict, timeout: int = 60) -> "_Resp":
+            body = _json.dumps(json).encode()
+            req = _ur.Request(url, data=body, headers={"Content-Type": "application/json"}, method="POST")
+            with _ur.urlopen(req, timeout=timeout) as r:
+                return _Resp(r.read(), r.status)
 
 HUBS = ["HB_NORTH", "HB_SOUTH", "HB_WEST", "HB_HOUSTON"]
 ISO = "ERCOT"
@@ -27,7 +54,7 @@ def retrain(base_url: str) -> None:
                 resp = requests.post(
                     f"{base_url}/train",
                     json={"iso": ISO, "node": hub, "market": market},
-                    timeout=600,  # XGBoost on 6 years of data may take several minutes
+                    timeout=1800,  # GPU training on 6 years of data; CPU fallback can take 20+ min
                 )
                 resp.raise_for_status()
                 data = resp.json()
