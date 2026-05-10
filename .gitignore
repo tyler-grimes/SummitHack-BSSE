@@ -48,3 +48,13 @@ Thumbs.db
 # Logs
 *.log
 logs/
+
+# Tools / AI assistants
+.letta/
+.opencode/
+
+# Docs (generated)
+docs/
+
+# TypeScript build info
+*.tsbuildinfo
